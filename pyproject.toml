@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "disposition"
+version = "0.1.0"
+description = "A personalization layer for AI-assisted coding. Learns how you write, then steers your AI coding tool to match."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0 WITH Commons-Clause" }
+authors = [{ name = "Tyler Meade" }]
+dependencies = [
+    "typer>=0.12",
+    "mcp>=1.2",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Pulled in as later milestones need them. M0 does not require these.
+llm = ["anthropic>=0.40"]
+java = ["tree-sitter>=0.21", "tree-sitter-java>=0.21"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+disposition = "disposition.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["disposition"]
