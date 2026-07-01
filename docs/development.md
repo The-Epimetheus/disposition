@@ -49,6 +49,30 @@ claude mcp add disposition -- disposition serve
 For M0 the server exposes one tool, `active_style`, which returns the merged
 Active Style as text. Forced Injection and the Verification Gate come later.
 
+## Versioning
+
+Versions are managed by [bump](https://github.com/launchfirestorm/bump).
+`bump.toml` is the source of truth.
+
+```
+bump print               # v0.1.0  (prefixed, used for git tags)
+bump print --no-prefix   # 0.1.0   (PEP 440, used for pyproject and __init__)
+bump --patch             # 0.1.0 -> 0.1.1
+bump --minor             # 0.1.0 -> 0.2.0
+bump --major             # 0.1.0 -> 1.0.0
+```
+
+After a version change, sync the Python files and tag:
+
+```
+sed -i "s|^version = .*|version = \"$(bump print --no-prefix)\"|" pyproject.toml
+sed -i "s|^__version__ = .*|__version__ = \"$(bump print --no-prefix)\"|" disposition/__init__.py
+bump tag                 # annotated git tag, e.g. v0.1.0
+```
+
+Note: sync pyproject.toml from `bump print --no-prefix`, not `bump update`.
+As of bump 7.1.0 `bump update` writes the "v" prefix, which PEP 440 rejects.
+
 ## What M0 includes
 
 - `disposition/config.py` - load and write `~/.disposition/config.toml`.

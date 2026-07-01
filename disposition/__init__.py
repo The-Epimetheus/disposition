@@ -6,4 +6,4 @@ capture, induction, retrieval, and verification stages arrive in later
 milestones (see docs/v1-implementation-plan.md).
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
