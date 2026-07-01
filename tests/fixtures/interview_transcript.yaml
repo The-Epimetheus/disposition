@@ -1,0 +1,29 @@
+# Canned interview transcript: the human-in-the-loop step completed with test
+# data. Covers all three scenarios with a mix of "do" (code -> Provisional Rule
+# + Exemplar) and "declare" (principle -> Confirmed Rule) answers.
+language: java
+platform: android
+answers:
+  - scenario: data-race
+    mode: do
+    code: |
+      class Counter {
+          private final AtomicInteger count = new AtomicInteger();
+          void increment() { count.incrementAndGet(); }
+          int get() { return count.get(); }
+      }
+    principle: Prefer lock-free atomics over synchronized blocks for simple counters.
+
+  - scenario: nested-cleanup
+    mode: declare
+    principle: Use guard clauses and early returns; never nest conditionals more than one level deep.
+
+  - scenario: resource-leak
+    mode: do
+    code: |
+      String read(String path) throws IOException {
+          try (InputStream in = new FileInputStream(path)) {
+              return new String(in.readAllBytes());
+          }
+      }
+    principle: Always acquire closeable resources with try-with-resources.

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from .cascade import active_style
-from .models import Layer, Rule, Status
+from .models import Exemplar, Layer, Rule, Status
 
 
 class Store:
@@ -68,6 +68,80 @@ class Store:
     def active_style(self, language: str) -> list[Rule]:
         """The merged, winning set of Rules for a given language."""
         return active_style(self.load_active_layers(language))
+
+    # -- exemplars -----------------------------------------------------------
+
+    def exemplars_dir(self, layer: Layer, language: str | None = None) -> Path:
+        return self._layer_dir(layer, language) / "exemplars"
+
+    def index_dir(self, layer: Layer, language: str | None = None) -> Path:
+        return self._layer_dir(layer, language) / "index"
+
+    def load_exemplars(
+        self, layer: Layer, language: str | None = None
+    ) -> list[Exemplar]:
+        path = self.exemplars_dir(layer, language) / "exemplars.yaml"
+        if not path.exists():
+            return []
+        data = yaml.safe_load(path.read_text()) or {}
+        exemplars: list[Exemplar] = []
+        for item in data.get("exemplars", []):
+            exemplars.append(
+                Exemplar(
+                    id=item["id"],
+                    code=item["code"],
+                    language=item.get("language", language or ""),
+                    layer=layer,
+                    source=item.get("source", ""),
+                    start_line=int(item.get("start_line", 0)),
+                    end_line=int(item.get("end_line", 0)),
+                    provenance=item.get("provenance", ""),
+                    tags=list(item.get("tags", [])),
+                )
+            )
+        return exemplars
+
+    def save_exemplars(
+        self, layer: Layer, exemplars: list[Exemplar], language: str | None = None
+    ) -> Path:
+        directory = self.exemplars_dir(layer, language)
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "exemplars": [
+                {
+                    "id": ex.id,
+                    "code": ex.code,
+                    "language": ex.language,
+                    "source": ex.source,
+                    "start_line": ex.start_line,
+                    "end_line": ex.end_line,
+                    "provenance": ex.provenance,
+                    "tags": ex.tags,
+                }
+                for ex in exemplars
+            ]
+        }
+        path = directory / "exemplars.yaml"
+        path.write_text(yaml.safe_dump(payload, sort_keys=False))
+        return path
+
+    def add_exemplars(
+        self, layer: Layer, new: list[Exemplar], language: str | None = None
+    ) -> list[Exemplar]:
+        """Append exemplars, de-duplicating by id. Returns the merged set."""
+        existing = self.load_exemplars(layer, language)
+        by_id = {ex.id: ex for ex in existing}
+        for ex in new:
+            by_id[ex.id] = ex
+        merged = list(by_id.values())
+        self.save_exemplars(layer, merged, language)
+        return merged
+
+    def all_exemplars(self, language: str) -> list[Exemplar]:
+        """Exemplars from the layers active in v1 (Personal + Language)."""
+        return self.load_exemplars(Layer.PERSONAL) + self.load_exemplars(
+            Layer.LANGUAGE, language
+        )
 
     # -- writing -------------------------------------------------------------
 
