@@ -14,6 +14,7 @@ from pathlib import Path
 import typer
 
 from . import __version__
+from . import aging
 from .adapters import claude_code
 from .capture import ambient as ambient_mod
 from .capture import bootstrap as bootstrap_mod
@@ -258,6 +259,30 @@ def observe(
         f"Ambient: {result.commits} commit(s), {result.files} file(s), "
         f"{result.exemplars_added} exemplars added."
     )
+
+
+@app.command()
+def age(
+    language: str = typer.Option("java", help="Language layer to age."),
+) -> None:
+    """Decay stale Provisional Rules by age and drop those past the floor."""
+    store = _store()
+    counts = aging.age_profile(store, language=language)
+    typer.echo(f"Aged {counts['aged']} rules, dropped {counts['dropped']}.")
+
+
+@app.command()
+def drift(
+    language: str = typer.Option("java", help="Language layer to check for drift."),
+) -> None:
+    """Surface Delta Queries where recent code contradicts a Confirmed Rule."""
+    store = _store()
+    queries = aging.detect_drift(store, language=language, llm=get_llm())
+    if not queries:
+        typer.echo("No drift detected.")
+        return
+    for q in queries:
+        typer.echo(f"  [{q.rule_key}] {q.question}")
 
 
 @app.command()

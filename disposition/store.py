@@ -8,12 +8,18 @@ language itself (for example profiles/java). The Project layer is phase 2.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import yaml
 
 from .cascade import active_style
 from .models import Exemplar, Layer, Rule, Status
+
+
+def _today() -> str:
+    """Today's date as an ISO string, used to stamp a record's birth date."""
+    return datetime.date.today().isoformat()
 
 
 class Store:
@@ -54,6 +60,7 @@ class Store:
                     confidence=float(item.get("confidence", 0.5)),
                     provenance=item.get("provenance", ""),
                     tags=list(item.get("tags", [])),
+                    created=item.get("created", ""),
                 )
             )
         return rules
@@ -97,6 +104,7 @@ class Store:
                     end_line=int(item.get("end_line", 0)),
                     provenance=item.get("provenance", ""),
                     tags=list(item.get("tags", [])),
+                    created=item.get("created", ""),
                 )
             )
         return exemplars
@@ -117,6 +125,7 @@ class Store:
                     "end_line": ex.end_line,
                     "provenance": ex.provenance,
                     "tags": ex.tags,
+                    "created": ex.created or _today(),
                 }
                 for ex in exemplars
             ]
@@ -159,6 +168,7 @@ class Store:
                     "confidence": rule.confidence,
                     "provenance": rule.provenance,
                     "tags": rule.tags,
+                    "created": rule.created or _today(),
                 }
                 for rule in rules
             ]

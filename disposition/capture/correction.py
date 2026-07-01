@@ -13,6 +13,8 @@ becomes a Provisional Rule on the Language layer (the legible statement).
 
 from __future__ import annotations
 
+import re
+import subprocess
 from dataclasses import dataclass
 
 from ..embeddings import get_embedder
@@ -22,6 +24,42 @@ from ..models import Exemplar, Layer, Rule, Status
 
 # Below this the edit is treated as behavior-changing and excluded (ADR 0009).
 _PRESERVING_THRESHOLD = 0.7
+
+# Strips // line comments and /* ... */ block comments (C/Java family).
+_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+_WS_RE = re.compile(r"\s+")
+
+
+def _structurally_equivalent(a: str, b: str) -> bool:
+    """Sound-static tier: True if two snippets differ only in comments/whitespace.
+
+    Normalizes each side by stripping // and /* */ comments, collapsing every run
+    of whitespace to a single space, and trimming the ends, then compares. Purely
+    lexical and conservative -- it never claims equivalence it cannot see.
+    """
+
+    def norm(s: str) -> str:
+        return _WS_RE.sub(" ", _COMMENT_RE.sub(" ", s)).strip()
+
+    return norm(a) == norm(b)
+
+
+def run_tests(repo: str | None, cmd: str | None) -> bool | None:
+    """Test tier hook: run `cmd` in `repo` and report pass (True) / fail (False).
+
+    Returns None when no command (or no repo) is given -- the default -- so the
+    classifier can skip this tier entirely. Running Java tests is opt-in and can
+    be slow; callers must pass an explicit command to enable it.
+    """
+    if not cmd or not repo:
+        return None
+    try:
+        proc = subprocess.run(
+            cmd, cwd=repo, shell=True, capture_output=True, text=True
+        )
+    except OSError:
+        return None
+    return proc.returncode == 0
 
 
 @dataclass
@@ -33,14 +71,42 @@ class CorrectionResult:
 
 
 def classify_behavior_preserving(
-    ai_code: str, edited_code: str, llm
+    ai_code: str,
+    edited_code: str,
+    llm,
+    *,
+    tests_cmd: str | None = None,
+    repo: str | None = None,
 ) -> tuple[bool, float, str]:
     """Adversarially decide whether the edit only changes taste, not behavior.
 
-    The prompt asks the model to hunt for behavioral divergence rather than to
-    bless the edit. We then apply a strict floor: preserving only when the model
-    both says so and clears `_PRESERVING_THRESHOLD`; anything less is excluded.
+    Layered per ADR 0007: cheapest sound evidence first, LLM only as a last
+    resort, all under the same strict default-exclude contract.
+
+    Tier 1 (sound-static): if the two snippets are structurally identical once
+    comments and whitespace are normalized away, the edit is pure formatting and
+    we accept with full confidence WITHOUT calling the LLM.
+
+    Tier 2 (test hook, opt-in): when both `tests_cmd` and `repo` are supplied and
+    the repo's edited version passes the suite, that is strong evidence the edit
+    preserves behavior. Disabled by default (`tests_cmd`/`repo` are None) so
+    existing callers -- e.g. `reinforce` -- see unchanged behavior. Running Java
+    tests is opt-in because it is slow and side-effecting.
+
+    Tier 3 (LLM): otherwise fall through to the adversarial classifier below.
     """
+    # Tier 1: sound-static structural equivalence -- no LLM needed.
+    if _structurally_equivalent(ai_code, edited_code):
+        return True, 1.0, "formatting-only: structurally identical"
+
+    # Tier 2: opt-in test evidence. Only decisive when a command was provided
+    # and the edited version passes; anything else defers to the LLM tier.
+    if tests_cmd and repo:
+        passed = run_tests(repo, tests_cmd)
+        if passed:
+            return True, 1.0, "behavior-preserving: test suite passes on the edit"
+
+    # Tier 3: adversarial LLM classifier.
     prompt = (
         "You are auditing a developer's edit of AI-generated code. Your job is "
         "to find any way the EDIT changes observable behavior (outputs, side "
