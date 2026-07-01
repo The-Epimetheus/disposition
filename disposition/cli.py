@@ -15,9 +15,11 @@ import typer
 
 from . import __version__
 from .adapters import claude_code
+from .capture import ambient as ambient_mod
 from .capture import bootstrap as bootstrap_mod
 from .capture import correction as correction_mod
 from .capture import interview as interview_mod
+from .capture import provenance as provenance_mod
 from .config import Config, default_root
 from .gate import judge as gate_judge
 from .induction import consolidate as consolidate_fn
@@ -207,6 +209,54 @@ def reinforce(
     typer.echo(
         f"Accepted: rule_added={result.rule_added}, "
         f"exemplar_added={result.exemplar_added} ({result.reason})"
+    )
+
+
+@app.command()
+def track(
+    file: str = typer.Argument(..., help="Repo-relative file with AI-generated code."),
+    start: int = typer.Option(..., "--start", help="First line (1-based) of the span."),
+    end: int = typer.Option(..., "--end", help="Last line of the span."),
+    repo: str = typer.Option(".", "--repo", help="Repo root the file lives in."),
+) -> None:
+    """Record a span of AI-generated code to watch for later corrections."""
+    store = _store()
+    span = provenance_mod.record_span(store, repo, file, start, end)
+    typer.echo(f"Tracked {file}:{start}-{end} (span {span.id}).")
+
+
+@app.command()
+def watch(
+    repo: str = typer.Option(None, "--repo", help="Limit the scan to this repo."),
+    language: str = typer.Option("java", help="Language layer to reinforce."),
+) -> None:
+    """Scan tracked spans for edits, capturing behavior-preserving corrections."""
+    store = _store()
+    result = provenance_mod.scan(store, repo, language=language)
+    typer.echo(
+        f"Watch: {result.corrections} correction(s), {result.excluded} excluded, "
+        f"{result.pending} unchanged."
+    )
+
+
+@app.command()
+def observe(
+    repo: str = typer.Argument(..., help="Repo to capture new commits from."),
+    author: str = typer.Option(None, "--author", help="Restrict to this author."),
+    language: str = typer.Option("java", help="Language layer to enrich."),
+) -> None:
+    """Capture code authored since the last run as ambient style signal."""
+    store = _store()
+    result = ambient_mod.capture(store, repo, author=author, language=language)
+    if result.baseline:
+        typer.echo(
+            f"Ambient baseline set at {result.watermark[:10]}; "
+            "capturing forward from here."
+        )
+        return
+    typer.echo(
+        f"Ambient: {result.commits} commit(s), {result.files} file(s), "
+        f"{result.exemplars_added} exemplars added."
     )
 
 

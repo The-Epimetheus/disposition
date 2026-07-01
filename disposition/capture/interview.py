@@ -21,6 +21,7 @@ import yaml
 from ..models import Exemplar, Layer, Rule, Status
 from ..embeddings import get_embedder
 from ..index import VectorIndex
+from ..llm import get_llm
 
 
 # The three provocations. Prompts are intentionally terse and non-leading: they
@@ -100,6 +101,7 @@ def run_interview(
     platform: str = "",
     transcript: dict | None = None,
     embedder=None,
+    llm=None,
     input_fn=input,
     output_fn=print,
 ) -> InterviewResult:
@@ -107,8 +109,11 @@ def run_interview(
 
     With `transcript` supplied the run is non-interactive (the HITL step already
     completed with test data); otherwise the scenarios are put to the developer
-    via `input_fn`/`output_fn`. Either way, "do" answers become Provisional
-    Rules plus Exemplars and "declare" answers become Confirmed Rules.
+    via `input_fn`/`output_fn`. "do" answers become Provisional Rules plus
+    Exemplars and "declare" answers become Confirmed Rules. An answer may also
+    carry `narration` (a `/voice` stream-of-consciousness): the LLM extracts the
+    principles the developer declares aloud, each a Confirmed Rule, and the raw
+    narration is saved under ~/.disposition/interview.
     """
     if transcript is not None:
         language = transcript.get("language", language)
@@ -173,9 +178,63 @@ def run_interview(
                 )
             )
 
+        # A narration (via /voice) is stream-of-consciousness reasoning. The
+        # principles the developer states aloud are Confirmed Rules; the raw
+        # text is kept for the record. This is additive to any do/declare above.
+        narration = (ans.get("narration") or "").strip()
+        if narration:
+            if llm is None:
+                llm = get_llm()
+            _persist_narration(store, scenario["id"], narration)
+            for principle in _extract_principles(narration, scenario, llm):
+                new_rules.append(
+                    Rule(
+                        key=principle["key"],
+                        text=principle["text"],
+                        status=Status.CONFIRMED,
+                        layer=Layer.LANGUAGE,
+                        confidence=0.85,
+                        provenance="interview:voice",
+                        tags=["interview", "voice", scenario["id"]],
+                    )
+                )
+
     exemplars_added = _persist_exemplars(store, language, new_exemplars, embedder)
     rules_added = _persist_rules(store, language, new_rules)
     return InterviewResult(exemplars_added=exemplars_added, rules_added=rules_added)
+
+
+# -- narration (/voice) -----------------------------------------------------
+
+
+def _extract_principles(narration: str, scenario: dict, llm) -> list[dict]:
+    """Pull the style principles a developer declares in a spoken narration."""
+    prompt = (
+        "A developer narrated their thinking aloud while solving a coding "
+        "scenario. Extract only the style principles they DECLARE (things they "
+        "say they always or never do, or clearly prefer). Ignore questions, "
+        "hedges, and one-off observations. Return a JSON array of objects "
+        '{"key": short-kebab-topic, "text": one imperative sentence}.\n\n'
+        f"SCENARIO: {scenario['prompt']}\n\nNARRATION:\n{narration}"
+    )
+    data = llm.json(prompt)
+    items = data.get("principles", []) if isinstance(data, dict) else data
+    principles: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict) or not str(item.get("text", "")).strip():
+            continue
+        key = str(item.get("key") or scenario["key"]).strip() or scenario["key"]
+        principles.append({"key": key, "text": str(item["text"]).strip()})
+    return principles
+
+
+def _persist_narration(store, scenario_id: str, narration: str) -> None:
+    """Append the raw narration transcript to the interview record."""
+    directory = store.root / "interview"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{scenario_id}.md"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(narration.strip() + "\n\n---\n\n")
 
 
 # -- persistence ------------------------------------------------------------

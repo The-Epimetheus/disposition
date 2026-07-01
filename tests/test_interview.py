@@ -88,6 +88,42 @@ class InterviewTranscriptTest(unittest.TestCase):
         self.assertEqual(second.exemplars_added, 0)
         self.assertEqual(len(self.store.load_exemplars(Layer.LANGUAGE, "java")), 2)
 
+    def test_voice_narration_yields_confirmed_rules(self):
+        from disposition.llm import FakeLLM
+
+        # An answer carrying /voice narration; the fake extractor names two
+        # declared principles, which must land as Confirmed voice Rules.
+        transcript = {
+            "language": "java",
+            "answers": [
+                {
+                    "scenario": "data-race",
+                    "narration": (
+                        "I always kill shared mutable state rather than lock, "
+                        "and I reach for atomics when I must share."
+                    ),
+                }
+            ],
+        }
+        principles = [
+            {"key": "thread-safety", "text": "Prefer immutability over locks."},
+            {"key": "atomics", "text": "Use atomics for shared counters."},
+        ]
+        result = run_interview(
+            self.store,
+            language="java",
+            transcript=transcript,
+            llm=FakeLLM([principles]),
+        )
+        self.assertEqual(result.rules_added, 2)
+        rules = {r.key: r for r in self.store.load_rules(Layer.LANGUAGE, "java")}
+        self.assertEqual(rules["thread-safety"].status, Status.CONFIRMED)
+        self.assertEqual(rules["thread-safety"].provenance, "interview:voice")
+        # The raw narration is saved for the record.
+        transcript_file = pathlib.Path(self.tmp.name) / "interview" / "data-race.md"
+        self.assertTrue(transcript_file.exists())
+        self.assertIn("shared mutable state", transcript_file.read_text())
+
     def test_interactive_path_via_injected_io(self):
         scripted = iter(
             [
