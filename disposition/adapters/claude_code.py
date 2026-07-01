@@ -56,29 +56,35 @@ def generate_claude_md_section(
     task: str | None = None,
     embedder=None,
     k_exemplars: int = 3,
+    strategy: str | None = None,
 ) -> str:
     """Render the Active Style (and a few exemplars) as a Markdown block.
 
-    Without a `task` we emit the whole merged Active Style and a handful of
-    exemplars. With a `task` we defer to retrieval so the block is scoped to
-    what the current job actually needs (dynamic injection, strategy B).
+    Injection is governed by `strategy` (A full / B dynamic / C hybrid); when
+    None we read the configured default (Config.load().injection["strategy"]).
+    We delegate to injection.build_injection so the CLAUDE.md block honors the
+    same Forced Injection policy as every other surface. `task` steers the
+    task-relevant (B/C) retrieval and is ignored by the full (A) policy.
     """
-    if task is not None:
-        # Import lazily: retrieval is a sibling component, not a hard dep here.
-        from ..retrieval import retrieve
+    if strategy is None:
+        # Import lazily so the adapter has no hard dep on config at import time.
+        from ..config import Config
 
-        result = retrieve(
-            store,
-            task=task,
-            language=language,
-            k_exemplars=k_exemplars,
-            embedder=embedder,
-        )
-        rules = result.rules
-        exemplars = result.exemplars
-    else:
-        rules = store.active_style(language)
-        exemplars = store.all_exemplars(language)[:k_exemplars]
+        strategy = Config.load().injection.get("strategy", "B")
+
+    # Import lazily: injection is a sibling component, not a hard dep here.
+    from ..injection import build_injection
+
+    envelope = build_injection(
+        store,
+        language=language,
+        task=task,
+        strategy=strategy,
+        embedder=embedder,
+        k_exemplars=k_exemplars,
+    )
+    rules = envelope.rules
+    exemplars = envelope.exemplars
 
     lines = [
         START_MARKER,
