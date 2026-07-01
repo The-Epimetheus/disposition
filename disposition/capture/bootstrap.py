@@ -12,11 +12,11 @@ deterministic LocalEmbedder. No network, no LLM.
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..embeddings import Embedder, get_embedder
+from ..gitutil import git_lines
 from ..index import VectorIndex
 from ..java import chunk_java_file
 from ..models import Exemplar, Layer
@@ -31,35 +31,15 @@ class BootstrapResult:
     index_size: int
 
 
-def _git_lines(repo_path: str, args: list[str]) -> list[str]:
-    """Run a git command in `repo_path`, returning stripped non-empty lines.
-
-    Returns [] on any failure (not a repo, git missing) so bootstrap degrades
-    gracefully rather than raising on a malformed environment.
-    """
-    try:
-        proc = subprocess.run(
-            ["git", "-C", repo_path, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return []
-    if proc.returncode != 0:
-        return []
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-
-
 def _tracked_java(repo_path: str, author: str | None) -> list[str]:
     """Relative paths of tracked *.java files, optionally scoped to `author`."""
-    tracked = _git_lines(repo_path, ["ls-files", "*.java"])
+    tracked = git_lines(repo_path, ["ls-files", "*.java"])
     if not author:
         return tracked
     # Files this author authored/touched, intersected with tracked set so we
     # never chunk a path that has since been deleted.
     touched = set(
-        _git_lines(
+        git_lines(
             repo_path,
             ["log", f"--author={author}", "--name-only", "--pretty=format:"],
         )
