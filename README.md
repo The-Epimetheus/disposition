@@ -4,7 +4,7 @@
 
 Disposition is a personalization layer for AI-assisted coding. It learns how you like to write code, then steers your AI coding tool to write that same way.
 
-> Status: early. The design is done (see `CONTEXT.md` and `docs/adr/`), and the v1 build is planned in `docs/v1-implementation-plan.md`. There is no installable release yet. The install and usage steps below describe the v1 flow we are building toward, not something you can run today.
+> Status: v1 is built. Milestones M0 through M4 are complete and released (see the releases page and `CHANGELOG.md`). It runs today: install from source and go. It is not published to PyPI yet, and it is a proof of concept, so expect rough edges.
 
 ---
 
@@ -25,43 +25,53 @@ Disposition fixes that. It captures how *you* write, then makes the AI write tha
 
 Disposition owns no model and writes no code itself. It steers a tool you already use. It is not fine-tuning either. It shapes output through context (prompts, examples, retrieval), not by changing model weights.
 
-## What it will do
+## What's built in v1
 
-The first version (v1) is deliberately narrow so we can prove the whole loop works end-to-end:
+The v1 target is Claude Code, Java, and starts solo but includes a shared team layer. The whole loop works end to end:
 
-- Host: Claude Code
-- Language: Java
-- Scope: solo developer (your personal and per-language style)
+- **Capture.** Bootstrap mines your own code (author-filtered) into examples. The interview draws out your reasoning with small coding scenarios, live or by voice narration, and adapts its follow-ups to the gaps. Corrections learn from your edits to AI output, both when you point them out and passively by watching a tracked span. Ambient capture folds in new commits as you write them.
+- **Distill.** Induction turns your examples into plain-language rules, auto-accepting the mechanical ones and leaving the rest for you. Consolidation merges near-duplicates so the profile stays tidy.
+- **Steer.** Every generation gets your style forced into context (three injection strategies, your choice) through Claude Code or a proxy for tools that do not speak MCP.
+- **Check.** The verification gate grades output against your profile, cheap deterministic checks first, then an adversarial judge, and regenerates off-style code before you see it.
+- **Keep it honest.** The profile self-ages, decaying stale guesses, and surfaces drift for your sign-off instead of silently overwriting a preference you confirmed. A shared, in-repo project layer carries team house style, and cold-start archetypes seed a profile when you have no history yet.
 
-After that, the roadmap adds:
+The full milestone plan lives in `docs/v1-implementation-plan.md`.
 
-- **Team style.** A shared, per-repo house style that travels with the code, confirmed by a maintainer.
-- **More hosts.** A proxy path so tools that do not speak MCP still get steered.
-- **Richer learning.** Passive capture of your edits, voice narration during setup, and deeper checks on whether an edit changed behavior or just style.
+## Install
 
-The full plan lives in `docs/v1-implementation-plan.md`.
-
-## Install (planned, not yet available)
-
-The v1 install is meant to be simple:
+Not on PyPI yet, so install from source:
 
 ```
-pip install disposition        # not published yet
-disposition init               # set up ~/.disposition and register with Claude Code
+git clone https://github.com/The-Epimetheus/disposition
+cd disposition
+pip install -e .               # on a PEP 668 system: pip install --user --break-system-packages -e .
+disposition init               # set up ~/.disposition
 ```
 
-`init` walks you through onboarding: it reads your existing Java code, asks a few short coding questions, and builds your starting profile.
+The LLM-backed steps need an Anthropic key: `export ANTHROPIC_API_KEY=...`. See `docs/development.md` for details, including registering the MCP server with Claude Code.
 
-## Use (planned, not yet available)
+## Use
 
-Once set up, you mostly forget it is there. It runs behind your AI tool.
+A typical loop, from your code to steered, checked AI output:
 
 ```
-disposition status             # see your profile: rules, examples, confidence
-disposition reinforce <span>   # tell it "this edit is how I like it" and update the profile
+disposition bootstrap <repo> --author "You"     # mine your own code into examples
+disposition interview                            # or --adaptive, or --transcript <file>
+disposition induce --auto                        # distill rules from the examples
+disposition consolidate                          # merge near-duplicate rules
+disposition status                               # see your Active Style
+
+disposition inject --repo <repo> --task "..."    # force your style into <repo>/CLAUDE.md
+#   ...drive Claude Code on the task, then:
+disposition verify --file Out.java --task "..."  # run the output through the gate
+
+disposition track <file> --start N --end M       # mark AI code, then edit freely
+disposition watch                                # sweep up behavior-preserving corrections
+disposition observe <repo>                        # capture new commits as ambient signal
+disposition age; disposition drift               # profile hygiene: decay + drift review
 ```
 
-Day to day, you just use Claude Code as normal. Disposition injects your style, checks the output, and quietly learns from the edits you make.
+Day to day you mostly use Claude Code as normal; Disposition injects your style, checks the output, and learns from your edits.
 
 ## Why you should use it
 
