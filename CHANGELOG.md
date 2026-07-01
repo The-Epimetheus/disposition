@@ -5,6 +5,12 @@ The format follows Keep a Changelog; versions are managed with bump.
 
 ## [Unreleased]
 
+## [v1.0.0] - 2026-07-01
+
+- Docs: mark v1 (M0-M4) complete; real install and usage in README
+- M4: phase 2 (project layer, proxy, cold-start, adaptive interview, injection)
+- M3: signal quality (classifier tiers, deterministic gate, self-aging + drift)
+
 ## [v0.3.0] - 2026-07-01
 
 - M2: richer capture (passive corrections, ambient capture, voice narration)
