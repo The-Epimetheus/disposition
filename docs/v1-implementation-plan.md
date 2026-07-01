@@ -1,6 +1,8 @@
 # Disposition v1: Implementation Plan
 
-The first vertical slice. Scope (from the grilling session): **Claude Code host, Java, solo (Personal + Language layers), Python stack.** The Project layer, the proxy adapter, and cold-start archetypes are all phase 2.
+> Status: complete. Milestones M0 through M4 are all built and released (see `CHANGELOG.md` and the releases page). Everything below the milestone sequence was the plan; it now describes shipped code.
+
+The first vertical slice. Scope (from the grilling session): **Claude Code host, Java, solo (Personal + Language layers), Python stack.** The Project layer, the proxy adapter, and cold-start archetypes were phase 2 and are now built.
 
 This plan sits downstream of the twelve ADRs in `docs/adr/`. Where v1 deliberately simplifies an ADR's full design, it says so. Nothing here quietly contradicts a recorded decision.
 

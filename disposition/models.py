@@ -58,6 +58,7 @@ class Rule:
     confidence: float = 0.5
     provenance: str = ""
     tags: list[str] = field(default_factory=list)
+    created: str = ""           # ISO date the Rule was first stored (for aging)
 
     def precedence(self) -> tuple[int, int, float]:
         """The two-key precedence, with confidence as a same-layer tiebreaker.
@@ -88,6 +89,7 @@ class Exemplar:
     end_line: int = 0
     provenance: str = ""        # "bootstrap" | "interview" | "correction"
     tags: list[str] = field(default_factory=list)
+    created: str = ""           # ISO date the Exemplar was first stored (for aging)
 
     @staticmethod
     def make_id(source: str, start_line: int, code: str) -> str:

@@ -104,6 +104,7 @@ def run_interview(
     llm=None,
     input_fn=input,
     output_fn=print,
+    adaptive: bool = False,
 ) -> InterviewResult:
     """Run the interview, persist the results, and report the counts.
 
@@ -114,6 +115,13 @@ def run_interview(
     carry `narration` (a `/voice` stream-of-consciousness): the LLM extracts the
     principles the developer declares aloud, each a Confirmed Rule, and the raw
     narration is saved under ~/.disposition/interview.
+
+    With `adaptive=True` and no transcript (ADR 0012), the fixed battery is
+    followed by a short, LLM-driven round of gap-filling questions: the model
+    weighs what is already KNOWN against what is still NEEDED and asks only the
+    few follow-ups that close the biggest gaps. Each declared answer becomes a
+    Confirmed Rule (provenance "interview:adaptive"). `adaptive=False` keeps the
+    exact prior behaviour.
     """
     if transcript is not None:
         language = transcript.get("language", language)
@@ -199,9 +207,86 @@ def run_interview(
                     )
                 )
 
+    # Adaptive gap-filling: only when driven live (a transcript is a completed,
+    # fixed HITL run and is left exactly as before).
+    if adaptive and transcript is None:
+        if llm is None:
+            llm = get_llm()
+        new_rules.extend(
+            _collect_adaptive(store, language, llm, input_fn, output_fn)
+        )
+
     exemplars_added = _persist_exemplars(store, language, new_exemplars, embedder)
     rules_added = _persist_rules(store, language, new_rules)
     return InterviewResult(exemplars_added=exemplars_added, rules_added=rules_added)
+
+
+# -- adaptive gap-model (ADR 0012) ------------------------------------------
+
+
+def adaptive_followups(
+    store, *, language: str = "java", llm=None, max_questions: int = 3
+) -> list[dict]:
+    """Propose the few follow-ups that best close the gaps in a known Style.
+
+    Rather than re-asking the fixed battery, we hand the model what is already
+    KNOWN (the developer's Active Style) and ask it to reason about what is still
+    NEEDED: the biggest unsettled style topics. It returns up to `max_questions`
+    targeted, non-leading questions -- the most ground covered in the fewest
+    questions. Each item is ``{"key": short-kebab-topic, "question": prompt}``.
+    """
+    llm = llm or get_llm()
+    known = store.active_style(language)  # merged, winning Rules = what we KNOW
+    known_lines = "\n".join(f"- {r.key}: {r.text}" for r in known) or "(nothing yet)"
+    topics = ", ".join(sorted({s["key"] for s in SCENARIOS}))
+    prompt = (
+        "You are eliciting a developer's coding style with as few questions as "
+        "possible. Below is what is ALREADY KNOWN about their style. Find the "
+        "biggest GAPS -- important style topics not yet settled -- and propose up "
+        f"to {max_questions} targeted, non-leading follow-up questions that fill "
+        "the most ground in the fewest questions. Do not re-ask what is already "
+        "known, and never hint at the 'right' answer inside the question.\n\n"
+        f"LANGUAGE: {language}\nCOMMON TOPICS: {topics}\n\n"
+        f"ALREADY KNOWN:\n{known_lines}\n\n"
+        'Return a JSON array of objects {"key": short-kebab-topic, '
+        '"question": one neutral question}.'
+    )
+    data = llm.json(prompt)
+    items = data.get("questions", []) if isinstance(data, dict) else data
+    out: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        key = str(item.get("key") or "").strip()
+        if not question or not key:  # both fields required to be actionable
+            continue
+        out.append({"key": key, "question": question})
+        if len(out) >= max_questions:
+            break
+    return out
+
+
+def _collect_adaptive(store, language, llm, input_fn, output_fn) -> list[Rule]:
+    """Ask each proposed follow-up; a declared answer becomes a Confirmed Rule."""
+    rules: list[Rule] = []
+    for followup in adaptive_followups(store, language=language, llm=llm):
+        output_fn("\n" + followup["question"])
+        answer = input_fn("Principle (blank to skip): ").strip()
+        if not answer:  # a skipped gap stays a gap, not a hollow rule
+            continue
+        rules.append(
+            Rule(
+                key=followup["key"],
+                text=answer,
+                status=Status.CONFIRMED,
+                layer=Layer.LANGUAGE,
+                confidence=0.9,
+                provenance="interview:adaptive",
+                tags=["interview", "adaptive"],
+            )
+        )
+    return rules
 
 
 # -- narration (/voice) -----------------------------------------------------

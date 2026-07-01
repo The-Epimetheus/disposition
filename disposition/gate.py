@@ -8,8 +8,12 @@ invites a rubber stamp. When a `regenerate` callback is supplied we feed the
 violations back and retry up to a cap; if it never comes clean we escalate to
 the human rather than silently ship a violation.
 
-This is the LLM-judge tier only. A cheaper deterministic tier (linters, AST
-checks) lands in M3; here every verdict comes from the model.
+Two tiers guard the envelope (ADR 0006). A cheap DETERMINISTIC tier runs first
+each round -- pure string/pattern checks, no LLM -- and only what survives it
+reaches the adversarial LLM judge above. The deterministic tier derives its
+checks from the developer's own CONFIRMED *mechanical* Rules (plus a handful of
+universal format checks), so it stays specific to this developer and averse to
+false positives.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from typing import Callable
 
 from .config import Config
 from .llm import LLM, get_llm
+from .models import Status
 
 
 @dataclass
@@ -98,6 +103,70 @@ def judge(output: str, retrieved, llm: LLM, task: str = "") -> list[Violation]:
     return violations
 
 
+def _leading_ws(line: str) -> str:
+    # The run of whitespace before the first non-space/tab character.
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+def deterministic_check(output: str, retrieved) -> list[Violation]:
+    """The cheap tier: catch clear mechanical breaks with no LLM call.
+
+    Runs before the judge. Emits `Violation`s for two sources:
+
+    * A few *universal* format faults that are almost never intentional --
+      trailing whitespace, and tab indentation where the output otherwise
+      indents with spaces (mixed tabs). These cite a synthetic "format:" key.
+    * The developer's own CONFIRMED Rules tagged "mechanical". We only act on
+      rules whose text names a concretely checkable pattern (e.g. "System.out",
+      "logging", "TAG" -> flag a literal ``System.out.println`` call). Rules
+      that read as judgement (e.g. "final" for locals) are left to the judge.
+
+    Deliberately conservative: each check is a definite, citable fault, so a
+    clean output returns ``[]`` and never blocks generation on a guess.
+    """
+    violations: list[Violation] = []
+    lines = output.splitlines()
+
+    # --- Universal: trailing whitespace (ignore blank/whitespace-only lines). ---
+    trailing = [
+        i for i, line in enumerate(lines, 1)
+        if line.strip() and line != line.rstrip()
+    ]
+    if trailing:
+        where = ", ".join(str(n) for n in trailing[:5])
+        more = "..." if len(trailing) > 5 else ""
+        violations.append(
+            Violation("format:trailing-whitespace", f"trailing whitespace on line(s) {where}{more}")
+        )
+
+    # --- Universal: tab indentation when spaces are the prevailing style. ---
+    space_indented = any(_leading_ws(l).startswith(" ") for l in lines)
+    tab_lines = [i for i, l in enumerate(lines, 1) if _leading_ws(l).startswith("\t")]
+    if space_indented and tab_lines:
+        where = ", ".join(str(n) for n in tab_lines[:5])
+        more = "..." if len(tab_lines) > 5 else ""
+        violations.append(
+            Violation("format:mixed-tabs", f"tab indentation where spaces are used on line(s) {where}{more}")
+        )
+
+    # --- Rule-derived: only CONFIRMED, "mechanical"-tagged rules. ---
+    for rule in getattr(retrieved, "rules", []) or []:
+        if rule.status != Status.CONFIRMED or "mechanical" not in (rule.tags or []):
+            continue
+        text = rule.text.lower()
+        # "final" for locals reads as judgement, not a mechanical pattern -> skip.
+        if "final" in text:
+            continue
+        # A logging-discipline rule: flag the literal console print it forbids.
+        if any(kw in text for kw in ("system.out", "logging", "tag")):
+            if "System.out.println" in output:
+                violations.append(
+                    Violation(rule.key, "uses System.out.println; rule requires proper logging")
+                )
+
+    return violations
+
+
 def verify(
     output: str,
     retrieved,
@@ -107,11 +176,13 @@ def verify(
     max_regens: int = 3,
     regenerate: Callable[[str, list[Violation]], str] | None = None,
 ) -> GateResult:
-    """Judge `output`, regenerate against violations up to `max_regens`, escalate.
+    """Check `output`, regenerate against violations up to `max_regens`, escalate.
 
-    Loop: judge -> if clean, pass; else if a `regenerate` callback exists, feed
-    it the previous output and the violations to get a fresh attempt, and judge
-    again. Stop when clean or the cap is hit; hitting the cap sets `escalated`.
+    Each round runs the cheap deterministic tier FIRST, then the adversarial
+    LLM judge, and combines their violations. Loop: check -> if clean, pass;
+    else if a `regenerate` callback exists, feed it the previous output and the
+    combined violations to get a fresh attempt, and check again. Stop when clean
+    or the cap is hit; hitting the cap sets `escalated`.
     """
     if llm is None:
         # The judge runs on the configured judge model, distinct from generation.
@@ -122,14 +193,18 @@ def verify(
         if isinstance(llm, LLM) and type(llm).__name__ == "LLM":
             llm.model = cfg.models["judge"]
 
+    def _check(text: str) -> list[Violation]:
+        # Deterministic tier first (no LLM), then the LLM judge; combine.
+        return deterministic_check(text, retrieved) + judge(text, retrieved, llm, task=task)
+
     current = output
-    violations = judge(current, retrieved, llm, task=task)
+    violations = _check(current)
     regens = 0
 
     while violations and regenerate is not None and regens < max_regens:
         current = regenerate(current, violations)
         regens += 1
-        violations = judge(current, retrieved, llm, task=task)
+        violations = _check(current)
 
     passed = not violations
     return GateResult(

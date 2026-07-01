@@ -14,6 +14,9 @@ from pathlib import Path
 import typer
 
 from . import __version__
+from . import aging
+from . import coldstart
+from . import project as project_mod
 from .adapters import claude_code
 from .capture import ambient as ambient_mod
 from .capture import bootstrap as bootstrap_mod
@@ -110,12 +113,15 @@ def interview(
     ),
     language: str = typer.Option("java", help="Language layer to populate."),
     platform: str = typer.Option("", help="Target platform (e.g. android, backend)."),
+    adaptive: bool = typer.Option(
+        False, "--adaptive", help="Follow the fixed battery with LLM-driven gap-filling questions."
+    ),
 ) -> None:
     """Run the provocation interview, live or from a canned transcript."""
     store = _store()
     data = interview_mod.load_transcript(transcript) if transcript else None
     result = interview_mod.run_interview(
-        store, language=language, platform=platform, transcript=data
+        store, language=language, platform=platform, transcript=data, adaptive=adaptive
     )
     typer.echo(
         f"Interview: added {result.rules_added} rules and "
@@ -158,11 +164,15 @@ def inject(
     repo: str = typer.Option(".", "--repo", help="Repo whose CLAUDE.md to update."),
     task: str = typer.Option(None, "--task", help="Scope injection to this task via retrieval."),
     language: str = typer.Option("java", help="Language layer to inject."),
+    strategy: str = typer.Option(
+        None, "--strategy", help="Injection policy: A full / B dynamic / C hybrid (default from config)."
+    ),
 ) -> None:
     """Write the Active Style into <repo>/CLAUDE.md and print the MCP command."""
     store = _store()
+    strat = strategy or Config.load().injection.get("strategy", "B")
     section = claude_code.generate_claude_md_section(
-        store, language=language, task=task
+        store, language=language, task=task, strategy=strat
     )
     path = claude_code.write_claude_md(section, repo=repo)
     typer.echo(f"Wrote Disposition block to {path}")
@@ -258,6 +268,73 @@ def observe(
         f"Ambient: {result.commits} commit(s), {result.files} file(s), "
         f"{result.exemplars_added} exemplars added."
     )
+
+
+@app.command()
+def age(
+    language: str = typer.Option("java", help="Language layer to age."),
+) -> None:
+    """Decay stale Provisional Rules by age and drop those past the floor."""
+    store = _store()
+    counts = aging.age_profile(store, language=language)
+    typer.echo(f"Aged {counts['aged']} rules, dropped {counts['dropped']}.")
+
+
+@app.command()
+def drift(
+    language: str = typer.Option("java", help="Language layer to check for drift."),
+) -> None:
+    """Surface Delta Queries where recent code contradicts a Confirmed Rule."""
+    store = _store()
+    queries = aging.detect_drift(store, language=language, llm=get_llm())
+    if not queries:
+        typer.echo("No drift detected.")
+        return
+    for q in queries:
+        typer.echo(f"  [{q.rule_key}] {q.question}")
+
+
+@app.command()
+def project(
+    repo: str = typer.Argument(..., help="Repo whose house style to derive."),
+    author: str = typer.Option(None, "--author", help="Restrict derivation to this author's files."),
+    language: str = typer.Option("java", help="Language layer to derive against."),
+    auto: bool = typer.Option(False, "--auto", help="Confirm every derived rule (non-interactive)."),
+) -> None:
+    """Derive the repo's shared PROJECT house style, then confirm and commit it."""
+    store = _store()
+    rules = project_mod.derive_project(repo, language=language, author=author)
+    if not rules:
+        typer.echo("No source found to derive house style from.")
+        return
+    path = project_mod.save_project_rules(repo, rules)
+    counts = project_mod.confirm_project(repo, language=language, auto=auto)
+    typer.echo(
+        f"Project: derived {len(rules)} rule(s), {counts['confirmed']} confirmed."
+    )
+    typer.echo(f"Wrote house style to {path}")
+
+
+@app.command()
+def archetypes() -> None:
+    """List the available cold-start archetypes."""
+    for name in coldstart.list_archetypes():
+        typer.echo(f"  {name}")
+
+
+@app.command()
+def archetype(
+    name: str = typer.Argument(..., help="Archetype to seed into the Language layer."),
+    language: str = typer.Option("java", help="Language layer to seed."),
+) -> None:
+    """Seed a cold-start archetype's Rules into the Language layer."""
+    store = _store()
+    try:
+        added = coldstart.apply_archetype(store, name, language=language)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1)
+    typer.echo(f"Archetype '{name}': added {added} new rule(s).")
 
 
 @app.command()
