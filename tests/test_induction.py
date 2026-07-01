@@ -12,7 +12,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from disposition.induction import Candidate, induce, triage
+from disposition.induction import Candidate, consolidate, induce, triage
 from disposition.llm import FakeLLM
 from disposition.models import Exemplar, Layer, Status
 from disposition.store import Store
@@ -124,6 +124,49 @@ class TestTriageAuto(unittest.TestCase):
         matching = [r for r in rules if r.key == "brace-style"]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0].text, "new")
+
+
+class TestConsolidate(unittest.TestCase):
+    def test_merges_duplicates_and_rederives_status(self):
+        store = _store()
+        # Three logging rules (dupes) + one distinct rule, pre-seeded as rules.
+        triage(
+            store,
+            [
+                Candidate("tag-logging", "Use a TAG constant.", 0.9, True),
+                Candidate("log-with-tag", "Log via a TAG.", 0.85, True),
+                Candidate("null-guard", "Guard nulls early.", 0.8, False),
+            ],
+            language="java",
+            auto=True,
+        )
+        # The fake consolidator merges the two logging rules into one canonical
+        # mechanical rule and keeps the null guard.
+        canned = [
+            {
+                "key": "tag-logging",
+                "text": "Use android Log with a class-level TAG constant.",
+                "confidence": 0.95,
+                "mechanical": True,
+                "merged_from": ["tag-logging", "log-with-tag"],
+            },
+            {
+                "key": "null-guard",
+                "text": "Guard nulls early.",
+                "confidence": 0.8,
+                "mechanical": False,
+                "merged_from": ["null-guard"],
+            },
+        ]
+        counts = consolidate(store, language="java", llm=FakeLLM([canned]))
+        self.assertEqual(counts, {"before": 3, "after": 2})
+
+        rules = {r.key: r for r in store.load_rules(Layer.LANGUAGE, "java")}
+        self.assertEqual(set(rules), {"tag-logging", "null-guard"})
+        # Mechanical + high confidence -> Confirmed; judgement -> Provisional.
+        self.assertEqual(rules["tag-logging"].status, Status.CONFIRMED)
+        self.assertEqual(rules["null-guard"].status, Status.PROVISIONAL)
+        self.assertEqual(rules["tag-logging"].provenance, "consolidation")
 
 
 class TestTriageInteractive(unittest.TestCase):

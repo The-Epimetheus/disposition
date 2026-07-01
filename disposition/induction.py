@@ -111,6 +111,73 @@ def _induce_batch(llm, batch, language: str) -> list[Candidate]:
     return candidates
 
 
+_CONSOLIDATE_SYSTEM = (
+    "You consolidate a developer's style rules. Merge only rules that express "
+    "the same underlying preference into one canonical rule; keep genuinely "
+    "distinct rules separate (for example, an IO-scheduler rule and a "
+    "main-thread-observe rule are different). Never invent new preferences and "
+    "preserve the developer's specifics."
+)
+
+
+def consolidate(store: Store, *, language: str = "java", llm=None) -> dict:
+    """Merge semantically duplicate Rules in the Language layer into canonical ones.
+
+    Induction over batches coins synonym keys for the same idea, so a real
+    profile accumulates near-duplicates. One LLM pass collapses them: it returns
+    a canonical set, each rule noting which originals it `merged_from`. Status is
+    re-derived by the same policy as triage (mechanical + high confidence ->
+    Confirmed), so consolidation never silently promotes a judgement call.
+    """
+    llm = llm or get_llm()
+    rules = store.load_rules(Layer.LANGUAGE, language)
+    if len(rules) <= 1:
+        return {"before": len(rules), "after": len(rules)}
+
+    listing = "\n".join(
+        f"- key={r.key} | conf={r.confidence:.2f} | "
+        f"{'mechanical' if 'mechanical' in r.tags else 'judgement'} | {r.text}"
+        for r in rules
+    )
+    prompt = (
+        f"Here are {len(rules)} {language} style rules for one developer; many "
+        "are near-duplicates. Merge duplicates into canonical rules and keep "
+        "distinct ones separate. Return a JSON array of objects: "
+        '{"key": short-slug, "text": one-sentence rule, "confidence": 0..1, '
+        '"mechanical": true|false, "merged_from": [original keys]}.\n\n'
+        f"{listing}"
+    )
+    data = llm.json(prompt, system=_CONSOLIDATE_SYSTEM, max_tokens=8192)
+    items = data.get("rules", []) if isinstance(data, dict) else data
+
+    canonical: list[Rule] = []
+    for item in items:
+        if not isinstance(item, dict) or "key" not in item:
+            continue
+        confidence = float(item.get("confidence", 0.5))
+        mechanical = bool(item.get("mechanical", False))
+        status = (
+            Status.CONFIRMED
+            if mechanical and confidence >= _AUTO_CONFIRM_MIN
+            else Status.PROVISIONAL
+        )
+        canonical.append(
+            Rule(
+                key=str(item["key"]),
+                text=str(item.get("text", "")),
+                status=status,
+                layer=Layer.LANGUAGE,
+                confidence=confidence,
+                provenance="consolidation",
+                tags=["mechanical"] if mechanical else [],
+            )
+        )
+
+    if canonical:
+        store.save_rules(Layer.LANGUAGE, canonical, language)
+    return {"before": len(rules), "after": len(canonical)}
+
+
 def _to_rule(cand: Candidate, status: Status) -> Rule:
     return Rule(
         key=cand.key,

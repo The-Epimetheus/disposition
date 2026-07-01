@@ -20,6 +20,7 @@ from .capture import correction as correction_mod
 from .capture import interview as interview_mod
 from .config import Config, default_root
 from .gate import judge as gate_judge
+from .induction import consolidate as consolidate_fn
 from .induction import induce as induce_fn
 from .induction import triage as triage_fn
 from .llm import get_llm
@@ -135,6 +136,18 @@ def induce(
     typer.echo(
         f"Induction: {counts['confirmed']} confirmed, "
         f"{counts['provisional']} provisional."
+    )
+
+
+@app.command()
+def consolidate(
+    language: str = typer.Option("java", help="Language layer to consolidate."),
+) -> None:
+    """Merge near-duplicate rules in the Profile into canonical ones."""
+    store = _store()
+    counts = consolidate_fn(store, language=language)
+    typer.echo(
+        f"Consolidated {counts['before']} rules into {counts['after']}."
     )
 
 
