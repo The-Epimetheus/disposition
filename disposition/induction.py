@@ -47,19 +47,44 @@ def induce(
     *,
     language: str = "java",
     llm=None,
+    sample: int = 150,
+    batch_size: int = 50,
 ) -> list[Candidate]:
-    """Ask the LLM to propose candidate Rules over all exemplars for a language."""
+    """Ask the LLM to propose candidate Rules over a language's exemplars.
+
+    A real profile holds thousands of exemplars, far more than fits one prompt.
+    So we take an evenly-spaced `sample` across the corpus (which is grouped by
+    file, so even spacing spans many files) and induce over it in batches of
+    `batch_size`, merging the per-batch candidates by key and keeping the
+    highest-confidence version of each.
+    """
     llm = llm or get_llm()
     exemplars = store.all_exemplars(language)
     if not exemplars:
         return []
 
+    if len(exemplars) > sample:
+        step = len(exemplars) / sample
+        exemplars = [exemplars[int(i * step)] for i in range(sample)]
+
+    by_key: dict[str, Candidate] = {}
+    for start in range(0, len(exemplars), batch_size):
+        batch = exemplars[start : start + batch_size]
+        for cand in _induce_batch(llm, batch, language):
+            prev = by_key.get(cand.key)
+            if prev is None or cand.confidence > prev.confidence:
+                by_key[cand.key] = cand
+    return list(by_key.values())
+
+
+def _induce_batch(llm, batch, language: str) -> list[Candidate]:
+    """One LLM pass over a batch of exemplars -> candidate Rules."""
     blocks = "\n\n".join(
         f"// exemplar {i} ({ex.provenance or 'unknown'})\n{ex.code}"
-        for i, ex in enumerate(exemplars)
+        for i, ex in enumerate(batch)
     )
     prompt = (
-        f"Here are {len(exemplars)} {language} code exemplars written by one "
+        f"Here are {len(batch)} {language} code exemplars written by one "
         "developer. Infer the style rules they imply. Return a JSON array of "
         'objects: {"key": short-slug, "text": one-sentence rule, '
         '"confidence": 0..1, "mechanical": true|false}.\n\n'
