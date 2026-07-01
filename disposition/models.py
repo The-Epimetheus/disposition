@@ -8,6 +8,7 @@ drive the two-key precedence used to merge layers into an Active Style; see
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -66,3 +67,32 @@ class Rule:
         though Project is the more specific layer (ADR 0011).
         """
         return (STATUS_RANK[self.status], LAYER_RANK[self.layer], self.confidence)
+
+
+@dataclass
+class Exemplar:
+    """A snippet of the developer's real code, retrieved as a few-shot example.
+
+    Exemplars carry the tacit texture of Style that Rules cannot put into words
+    (see CONTEXT.md). `id` is stable and content-derived so re-ingesting the same
+    span does not create duplicates. Exemplars are embedded and indexed for
+    retrieval; the index is a derived cache, rebuildable from these records.
+    """
+
+    id: str
+    code: str
+    language: str
+    layer: Layer
+    source: str = ""            # file path, or "interview:<scenario>" etc.
+    start_line: int = 0
+    end_line: int = 0
+    provenance: str = ""        # "bootstrap" | "interview" | "correction"
+    tags: list[str] = field(default_factory=list)
+
+    @staticmethod
+    def make_id(source: str, start_line: int, code: str) -> str:
+        """A stable id from where the snippet came and what it contains."""
+        digest = hashlib.sha1(
+            f"{source}:{start_line}:{code}".encode("utf-8")
+        ).hexdigest()
+        return digest[:16]

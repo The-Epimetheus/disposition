@@ -40,6 +40,49 @@ def active_style(language: str = "java") -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def retrieve(task: str, language: str = "java") -> str:
+    """Return the Style envelope (rules + nearest exemplars) for a task.
+
+    This is the read side of the Style Profile (ADR 0006/0007): the merged
+    Active Style plus the developer's own exemplars nearest the task, so a host
+    can steer generation with both the legible rules and the tacit texture.
+
+    Args:
+        task: a description of what is being written, used to rank exemplars.
+        language: which Language layer to merge with Personal (default "java").
+    """
+    root = default_root()
+    if not root.exists():
+        return "Disposition is not initialized. Run `disposition init` first."
+
+    from .retrieval import retrieve as retrieve_fn
+
+    result = retrieve_fn(Store(root), task=task, language=language)
+    if not result.rules and not result.exemplars:
+        return "No style captured yet. Run onboarding (bootstrap/interview)."
+
+    lines = [f"Style envelope for: {task}", "", "Rules:"]
+    if result.rules:
+        for rule in result.rules:
+            lines.append(f"- ({rule.status.value}) [{rule.key}] {rule.text}")
+    else:
+        lines.append("- (none)")
+
+    lines += ["", "Exemplars:"]
+    if result.exemplars:
+        for ex in result.exemplars:
+            label = ex.source or ex.provenance or ex.id
+            lines.append(f"- {label}:")
+            lines.append(f"```{language}")
+            lines.append(ex.code.strip("\n"))
+            lines.append("```")
+    else:
+        lines.append("- (none)")
+
+    return "\n".join(lines)
+
+
 def main() -> None:
     """Run the server over stdio (the default FastMCP transport)."""
     mcp.run()
