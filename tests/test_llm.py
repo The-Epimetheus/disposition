@@ -70,6 +70,14 @@ class TestFakeLLMJson(unittest.TestCase):
         with self.assertRaises(LLMError):
             fake.json("p")
 
+    def test_json_salvages_truncated_array(self):
+        # A response cut off mid-object (token cap) still yields the complete
+        # objects rather than failing the whole batch.
+        truncated = '[{"key": "a", "v": 1}, {"key": "b", "v": 2}, {"key": "c'
+        fake = FakeLLM([truncated])
+        result = fake.json("p")
+        self.assertEqual([r["key"] for r in result], ["a", "b"])
+
 
 class TestGetLLM(unittest.TestCase):
     def test_returns_explicit_fake(self):

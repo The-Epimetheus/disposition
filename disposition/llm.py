@@ -43,7 +43,7 @@ class LLM:
         prompt: str,
         *,
         system: str = "",
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
         model: str | None = None,
     ) -> str:
         """Return the concatenated text of a single completion."""
@@ -66,7 +66,7 @@ class LLM:
         prompt: str,
         *,
         system: str = "",
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
         model: str | None = None,
     ) -> dict | list:
         """Ask for JSON, strip code fences, parse; one retry, then LLMError."""
@@ -148,7 +148,29 @@ def _parse_json(text: str) -> dict | list:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
+        salvaged = _salvage_truncated_array(cleaned)
+        if salvaged is not None:
+            return salvaged
         raise ValueError(str(exc)) from exc
+
+
+def _salvage_truncated_array(text: str) -> list | None:
+    """Recover a JSON array of flat objects that was cut off mid-output.
+
+    When the model hits its token cap the tail is a half-written object. We trim
+    back to the last fully-closed object and re-close the array, so induction
+    still gets every complete rule instead of failing on the whole batch.
+    """
+    if not text.lstrip().startswith("["):
+        return None
+    end = text.rfind("}")
+    if end == -1:
+        return None
+    candidate = text[: end + 1] + "]"
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
 
 
 def get_llm(config: Config | None = None, fake: LLM | None = None) -> LLM:

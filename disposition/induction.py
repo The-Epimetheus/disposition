@@ -90,7 +90,9 @@ def _induce_batch(llm, batch, language: str) -> list[Candidate]:
         '"confidence": 0..1, "mechanical": true|false}.\n\n'
         f"{blocks}"
     )
-    raw = llm.json(prompt, system=_INDUCE_SYSTEM)
+    # A batch of 50 exemplars can yield many rules; give the model room so the
+    # JSON is not truncated mid-array.
+    raw = llm.json(prompt, system=_INDUCE_SYSTEM, max_tokens=8192)
     # Tolerate either a bare array or a wrapping object with a "candidates" key.
     items = raw.get("candidates", []) if isinstance(raw, dict) else raw
 
