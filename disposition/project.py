@@ -20,12 +20,11 @@ from pathlib import Path
 
 import yaml
 
-from .cascade import active_style
 from .gitutil import git_lines
 from .java import chunk_java_file
 from .llm import get_llm
 from .models import Layer, Rule, Status
-from .store import Store, _today
+from .store import _today
 
 # House style lives inside the repo so it is versioned alongside the code.
 _PROJECT_DIR = ".disposition"
@@ -225,17 +224,3 @@ def _prompt_one(rule: Rule, *, input_fn, output_fn) -> tuple[Status | None, str]
         return Status.CONFIRMED, rule.text
     # Anything else (including empty) leaves it Provisional and non-steering.
     return Status.PROVISIONAL, rule.text
-
-
-def project_active_style(
-    store: Store, *, language: str = "java", repo: str | Path
-) -> list[Rule]:
-    """The Active Style over Personal + Language + this repo's PROJECT layer.
-
-    Feeds all three layers through the Cascade's two-key precedence: a Confirmed
-    Project rule outranks a Confirmed Personal rule on the same key (Project is
-    the more specific layer), but a Provisional Project rule does NOT override a
-    Confirmed Personal one -- confirmation status is the first precedence key.
-    """
-    rules = store.load_active_layers(language) + load_project_rules(repo, language)
-    return active_style(rules)

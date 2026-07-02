@@ -1,9 +1,18 @@
-"""Offline, deterministic text embeddings.
+"""Text embeddings for retrieval, with two adapters behind one config seam.
 
-Retrieval (ADR 0007) needs vectors for code exemplars and tasks, but M1 must
-run with no network and no model downloads. `LocalEmbedder` hashes character
-n-grams into a fixed-width vector with a stable hash, so the same text always
-maps to the same L2-normalized point. It is crude but reproducible and offline.
+Retrieval (ADR 0007) needs vectors for code exemplars and tasks. There are two
+ways to get them here:
+
+- `LocalEmbedder` (the default) hashes character n-grams into a fixed-width
+  vector with a stable hash, so the same text always maps to the same
+  L2-normalized point. It is crude but reproducible and needs no network or
+  downloads, which is what M1 wanted.
+- `SemanticEmbedder` runs a real code-aware embedding model via fastembed
+  (ONNX, no torch). The model downloads once and then runs fully offline, so it
+  stays inside the fully-local principle (ADR 0004) while giving much better
+  neighbours than the hash. It is opt-in via the `semantic` extra.
+
+`get_embedder(config)` picks between them from `models.embedding` in config.
 """
 
 from __future__ import annotations
@@ -77,6 +86,71 @@ class LocalEmbedder(Embedder):
         return out
 
 
+class SemanticEmbedder(Embedder):
+    """Real code-aware embeddings via fastembed (ONNX runtime, no torch).
+
+    Wraps a fastembed `TextEmbedding` model. The model downloads once on first
+    use and then runs offline, so it fits the fully-local principle (ADR 0004).
+    `backend` lets tests inject any object with the fastembed interface (an
+    `.embed(texts)` that yields one numpy vector per text); when None we import
+    fastembed lazily so importing this module never requires the extra.
+
+    The output dimension is read off the model itself (by embedding a probe
+    string once) rather than hard-coded, so swapping in a different fastembed
+    model just works.
+    """
+
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", *, backend=None) -> None:
+        self._model_name = model_name
+        if backend is None:
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as exc:  # extra not installed
+                raise ImportError(
+                    "SemanticEmbedder needs fastembed; install it with "
+                    'pip install "disposition[semantic]"'
+                ) from exc
+            backend = TextEmbedding(model_name=model_name)
+        self._backend = backend
+        self._dim: int | None = None  # filled lazily by the first probe
+
+    @property
+    def dim(self) -> int:
+        # Ask the model its own width by embedding a probe once, then cache it.
+        if self._dim is None:
+            probe = next(iter(self._backend.embed(["probe"])))
+            self._dim = int(np.asarray(probe).reshape(-1).shape[0])
+        return self._dim
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        dim = self.dim
+        out = np.zeros((len(texts), dim), dtype=np.float32)
+        # fastembed returns an iterable of numpy vectors, one per input text.
+        for row, vector in enumerate(self._backend.embed(texts)):
+            vec = np.asarray(vector, dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(vec))
+            if norm > 0.0:
+                vec = vec / norm
+            out[row] = vec
+        return out
+
+
 def get_embedder(config=None) -> Embedder:
-    """Default embedder for the pipeline. Offline `LocalEmbedder` for M1."""
-    return LocalEmbedder()
+    """Resolve the embedder named by config (models.embedding).
+
+    "local" (the default) is the offline hashing embedder; "semantic" is the
+    real fastembed model. Anything else is a configuration mistake and we say
+    so instead of silently ignoring it.
+    """
+    from .config import Config
+
+    cfg = config or Config.load()
+    name = str(cfg.models.get("embedding", "local"))
+    if name == "local":
+        return LocalEmbedder()
+    if name == "semantic":
+        return SemanticEmbedder()
+    raise ValueError(
+        f"unknown embedding model {name!r} in config.toml; "
+        "valid options are 'local' and 'semantic'"
+    )

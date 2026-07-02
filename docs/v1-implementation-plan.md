@@ -25,7 +25,7 @@ A local Python package (`disposition/`), a CLI, and an MCP server. All state liv
 | `adapters/claude_code` | Wire up `CLAUDE.md` and register the MCP server | 0001 |
 | `cli` | Onboarding, triage, `reinforce`, status and inspect | none |
 
-**Dependencies:** `mcp` (official SDK), `anthropic` (LLM calls), `tree-sitter` plus `tree-sitter-java` (AST), a local embedding model and a local vector store (say `sqlite` + `numpy`, or `lancedb`), `pygit2` or a git subprocess (blame, span anchoring), and `typer` (CLI).
+**Dependencies:** `mcp` (official SDK), `anthropic` (LLM calls), `tree-sitter` plus `tree-sitter-java` (AST; shipped as an optional extra with a heuristic fallback), a deterministic local hashing embedder with a `numpy` vector store (an offline stand-in for a real code embedding model), a git subprocess (blame, span anchoring), and `typer` (CLI).
 
 ---
 
@@ -59,8 +59,8 @@ One narrow path that touches every stage end-to-end on your real Java code. It i
 2. **Induce, then confirm** - one LLM pass over the Exemplars produces candidate Rules. Auto-accept the mechanical ones, CLI-triage the top-N, and leave the rest Provisional (ADR 0008).
 3. **Steer** - dynamic retrieval (strategy B) builds `CLAUDE.md` and serves an MCP retrieval tool. Force-inject it into Claude Code.
 4. **Generate** - drive Claude Code on a Java task (you kick it off by hand).
-5. **Verify** - the adversarial LLM-judge gate runs. Up to 3 targeted regens, then it escalates to you (ADR 0006). **Stub:** LLM-judge tier only; the deterministic and AST tiers come in M3.
-6. **Learn** - an explicit `disposition reinforce <span>` command captures a Correction. Behavior preservation runs through the LLM classifier with strict default-exclude (ADR 0007). **Stub:** explicit command only (passive span-diff lands in M2); LLM classifier tier only (AST and test tiers come in M3).
+5. **Verify** - the adversarial LLM-judge gate runs. Up to 3 targeted regens, then it escalates to you (ADR 0006). **Stub:** LLM-judge tier only; the deterministic tier comes in M3.
+6. **Learn** - an explicit `disposition reinforce <span>` command captures a Correction. Behavior preservation runs through the LLM classifier with strict default-exclude (ADR 0007). **Stub:** explicit command only (passive span-diff lands in M2); LLM classifier tier only (the static-equivalence and test tiers come in M3).
 
 **Definition of done for M1:** you run onboarding, Disposition steers Claude Code to write a Java function you judge to be inside your envelope, the gate visibly catches one off-style attempt and regenerates, and `reinforce` measurably changes the profile. Success is **your** Authorship Test call on a few tasks.
 
@@ -71,7 +71,7 @@ One narrow path that touches every stage end-to-end on your real Java code. It i
 - **M0, Skeleton:** package, `config.toml`, `store` with the Cascade merge, CLI shell, and an MCP server hello-world registered in Claude Code.
 - **M1, Thin thread:** section 3. Prove the loop on your Java.
 - **M2, Richer capture:** passive Correction span-diff watcher (git-anchored), Ambient Capture, and `/voice` narration in the Interview.
-- **M3, Signal quality:** AST and test classifier tiers (ADR 0007), the deterministic gate tier (ADR 0006), the self-aging profile, and Drift delta-queries (ADR 0009).
+- **M3, Signal quality:** more classifier tiers (ADR 0007; the planned AST tier shipped as a sound lexical-equivalence check plus an opt-in test-run tier instead), the deterministic gate tier (ADR 0006), the self-aging profile, and Drift delta-queries (ADR 0009).
 - **M4, Phase 2:** the Project layer with maintainer confirm (ADR 0011), the proxy adapter (ADR 0001), cold-start archetypes, the adaptive Interview gap-model (ADR 0012), and injection strategies A and C plus user config (ADR 0003 / Q19).
 
 ---

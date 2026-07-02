@@ -1,12 +1,15 @@
 # Development
 
-This is the M0 skeleton. It runs, but the real capture, induction, retrieval,
-and verification stages are not built yet. See `v1-implementation-plan.md` for
-the milestone plan.
+Disposition v1 is built: capture, induction, retrieval, injection, the
+Verification Gate, and profile hygiene all work end to end. See
+`v1-implementation-plan.md` for what shipped in each milestone.
 
 ## Requirements
 
-- Python 3.11 or newer (M0 uses the standard-library `tomllib`).
+- Python 3.11 or newer (config reading uses the standard-library `tomllib`).
+- An Anthropic API key (`export ANTHROPIC_API_KEY=...`) for the LLM-backed
+  commands: `induce`, `consolidate`, `verify`, `reinforce`, `drift`, `project`,
+  and the adaptive interview. Everything else runs fully offline.
 
 ## Install (editable)
 
@@ -16,12 +19,26 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+On a PEP 668 (externally managed) system without venv support:
+
+```
+pip install --user --break-system-packages -e .
+```
+
+Java AST chunking is an optional extra (`pip install -e ".[java]"`). Without
+it, a heuristic brace-counting parser is used instead.
+
+Real code embeddings are an optional extra too: `pip install -e ".[semantic]"`
+enables the fastembed model. It downloads the model once, then runs offline.
+
 ## Try it
 
 ```
 disposition init                 # scaffold ~/.disposition and write config
-disposition status               # show the Active Style (empty until M1)
-disposition version
+disposition bootstrap <repo>     # mine your code into exemplars
+disposition induce --auto        # distill rules from the exemplars
+disposition status               # show the merged Active Style
+disposition status --repo <r>    # include that repo's house style
 ```
 
 You can also run it without installing:
@@ -32,11 +49,13 @@ python3 -m disposition status
 
 ## Run the tests
 
-The Cascade tests need nothing but the standard library:
+The whole suite runs offline, with the LLM faked:
 
 ```
-python3 tests/test_cascade.py
+DISPOSITION_FAKE_LLM=1 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
+
+Each test file also runs standalone, for example `python3 tests/test_cascade.py`.
 
 ## Register the MCP server with Claude Code
 
@@ -46,8 +65,20 @@ After `pip install -e .`:
 claude mcp add disposition -- disposition serve
 ```
 
-For M0 the server exposes one tool, `active_style`, which returns the merged
-Active Style as text. Forced Injection and the Verification Gate come later.
+The server exposes two tools: `active_style` (the merged Active Style as text)
+and `retrieve` (the task-scoped Style envelope: rules plus exemplars).
+
+## Configuration (~/.disposition/config.toml)
+
+Every key is live: change it and behavior changes.
+
+- `models.generation` / `models.judge` - the Anthropic models used.
+- `models.embedding` - the embedder. Valid values are `"local"` (offline
+  hashing, the default) and `"semantic"` (real code embeddings via fastembed;
+  needs the semantic extra). Anything else is an error.
+- `injection.strategy` - the Forced Injection policy: A full, B dynamic, C hybrid.
+- `budgets.max_regens` - how many times the Gate regenerates before escalating.
+- `budgets.retrieval_top_k` - the rule budget retrieval injects per task.
 
 ## Versioning
 
@@ -55,11 +86,11 @@ Versions are managed by [bump](https://github.com/launchfirestorm/bump).
 `bump.toml` is the source of truth.
 
 ```
-bump print               # v0.1.0  (prefixed, used for git tags)
-bump print --no-prefix   # 0.1.0   (PEP 440, used for pyproject and __init__)
-bump --patch             # 0.1.0 -> 0.1.1
-bump --minor             # 0.1.0 -> 0.2.0
-bump --major             # 0.1.0 -> 1.0.0
+bump print               # v1.0.0  (prefixed, used for git tags)
+bump print --no-prefix   # 1.0.0   (PEP 440, used for pyproject and __init__)
+bump --patch             # 1.0.0 -> 1.0.1
+bump --minor             # 1.0.0 -> 1.1.0
+bump --major             # 1.0.0 -> 2.0.0
 ```
 
 After a version change, sync the Python files and tag:
@@ -67,17 +98,8 @@ After a version change, sync the Python files and tag:
 ```
 sed -i "s|^version = .*|version = \"$(bump print --no-prefix)\"|" pyproject.toml
 sed -i "s|^__version__ = .*|__version__ = \"$(bump print --no-prefix)\"|" disposition/__init__.py
-bump tag                 # annotated git tag, e.g. v0.1.0
+bump tag                 # annotated git tag, e.g. v1.0.0
 ```
 
 Note: sync pyproject.toml from `bump print --no-prefix`, not `bump update`.
 As of bump 7.1.0 `bump update` writes the "v" prefix, which PEP 440 rejects.
-
-## What M0 includes
-
-- `disposition/config.py` - load and write `~/.disposition/config.toml`.
-- `disposition/models.py` - the `Rule` type, plus `Status` and `Layer`.
-- `disposition/cascade.py` - the two-key merge (ADR 0002, ADR 0011).
-- `disposition/store.py` - read and write `rules.yaml`, compute the Active Style.
-- `disposition/cli.py` - the `version`, `init`, `status`, and `serve` commands.
-- `disposition/server.py` - the hello-world MCP server.

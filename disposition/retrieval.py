@@ -11,7 +11,9 @@ never depends on a prior indexing pass.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from .config import Config
 from .embeddings import Embedder, get_embedder
 from .index import VectorIndex
 from .models import Exemplar, Layer, Rule, Status
@@ -36,7 +38,12 @@ def _load_index(store: Store, language: str, embedder: Embedder) -> tuple[Vector
     by_id = {ex.id: ex for ex in exemplars}
     directory = store.index_dir(Layer.LANGUAGE, language)
     if VectorIndex.exists(directory):
-        return VectorIndex.load(directory), by_id
+        cached = VectorIndex.load(directory)
+        # The index is a derived cache keyed to one embedder. If its dim no
+        # longer matches the active embedder, the developer switched embedders
+        # in config, so the cache is stale; fall through and rebuild transiently.
+        if cached.dim == embedder.dim:
+            return cached, by_id
     # No cached index: build a transient one over whatever exemplars we have.
     index = VectorIndex(embedder.dim)
     if exemplars:
@@ -69,21 +76,26 @@ def retrieve(
     *,
     task: str,
     language: str = "java",
-    k_rules: int = 8,
+    k_rules: int | None = None,
     k_exemplars: int = 5,
     embedder: Embedder | None = None,
+    repo: str | Path | None = None,
 ) -> Retrieved:
     """Build the Style envelope for `task` in `language`.
 
     Rules come from the already-merged Active Style (Cascade has resolved
-    conflicts). Exemplars come from a nearest-neighbour search over the task
-    text. Exemplars that plainly contradict an applicable Confirmed rule are
-    dropped (ADR 0010); for M1 this is a lightweight keyword check and is a
-    no-op when there is no clear signal.
+    conflicts); pass `repo` to fold that repo's committed PROJECT house style
+    into the merge. The rule budget `k_rules` defaults to the configured
+    budgets.retrieval_top_k. Exemplars come from a nearest-neighbour search
+    over the task text. Exemplars that plainly contradict an applicable
+    Confirmed rule are dropped (ADR 0010); for M1 this is a lightweight keyword
+    check and is a no-op when there is no clear signal.
     """
     embedder = embedder or get_embedder()
+    if k_rules is None:
+        k_rules = int(Config.load().budgets.get("retrieval_top_k", 12))
 
-    rules = _cap_rules(store.active_style(language), k_rules)
+    rules = _cap_rules(store.active_style(language, repo), k_rules)
 
     index, by_id = _load_index(store, language, embedder)
     query = embedder.embed([task])[0]

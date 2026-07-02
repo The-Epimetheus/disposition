@@ -26,7 +26,6 @@ from disposition.project import (
     confirm_project,
     derive_project,
     load_project_rules,
-    project_active_style,
     save_project_rules,
 )
 from disposition.store import Store
@@ -144,7 +143,7 @@ class ProjectTest(unittest.TestCase):
                 )
             ],
         )
-        style = {r.key: r for r in project_active_style(self.store, repo=self.repo)}
+        style = {r.key: r for r in self.store.active_style("java", repo=self.repo)}
         # Same status -> the more specific Project layer wins.
         self.assertEqual(style["brace-style"].layer, Layer.PROJECT)
         self.assertEqual(style["brace-style"].text, "house style")
@@ -172,7 +171,7 @@ class ProjectTest(unittest.TestCase):
                 )
             ],
         )
-        style = {r.key: r for r in project_active_style(self.store, repo=self.repo)}
+        style = {r.key: r for r in self.store.active_style("java", repo=self.repo)}
         # Confirmation status is the first precedence key: Confirmed Personal
         # outranks the Provisional Project rule despite Project being specific.
         self.assertEqual(style["brace-style"].layer, Layer.PERSONAL)

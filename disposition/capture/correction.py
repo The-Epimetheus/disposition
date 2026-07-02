@@ -17,10 +17,9 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-from ..embeddings import get_embedder
-from ..index import VectorIndex
 from ..llm import get_llm
 from ..models import Exemplar, Layer, Rule, Status
+from .pipeline import CapturePipeline
 
 # Below this the edit is treated as behavior-changing and excluded (ADR 0009).
 _PRESERVING_THRESHOLD = 0.7
@@ -170,8 +169,8 @@ def reinforce(
 
     Behavior-changing edits are rejected outright (default-exclude). A preserving
     edit persists the edited code as a `correction` Exemplar and the LLM-named
-    taste delta as a Provisional Language-layer Rule, keeping any live vector
-    index warm so the new Exemplar is retrievable immediately.
+    taste delta as a Provisional Language-layer Rule, then rebuilds the vector
+    index so the new Exemplar is retrievable immediately.
     """
     llm = llm or get_llm()
     preserving, confidence, reason = classify_behavior_preserving(
@@ -192,24 +191,14 @@ def reinforce(
         source=src,
         provenance="correction",
     )
-    store.add_exemplars(Layer.LANGUAGE, [exemplar], language)
 
-    # Merge the taste-delta Rule into the Language layer, newest wins by key.
+    # Persist the correction Exemplar and merge the taste-delta Rule (newest wins
+    # by key) into the Language layer; the pipeline rebuilds the derived index so
+    # the new Exemplar is retrievable now.
     rule = _taste_delta_rule(ai_code, edited_code, confidence, llm)
-    existing = store.load_rules(Layer.LANGUAGE, language)
-    by_key = {r.key: r for r in existing}
-    by_key[rule.key] = rule
-    store.save_rules(Layer.LANGUAGE, list(by_key.values()), language)
-
-    # Keep a persisted index (if one exists) in step with the new Exemplar.
-    embedder = embedder or get_embedder()
-    index_dir = store.index_dir(Layer.LANGUAGE, language)
-    if VectorIndex.exists(index_dir):
-        index = VectorIndex.load(index_dir)
-        if index.dim == embedder.dim:
-            vector = embedder.embed([exemplar.code])[0]
-            index.add(exemplar.id, vector, {"id": exemplar.id, "source": src})
-            index.save(index_dir)
+    CapturePipeline(store, language, embedder=embedder).capture(
+        exemplars=[exemplar], rules=[rule]
+    )
 
     return CorrectionResult(
         accepted=True, reason=reason, rule_added=True, exemplar_added=True

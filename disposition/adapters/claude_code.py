@@ -57,6 +57,7 @@ def generate_claude_md_section(
     embedder=None,
     k_exemplars: int = 3,
     strategy: str | None = None,
+    repo: str | None = None,
 ) -> str:
     """Render the Active Style (and a few exemplars) as a Markdown block.
 
@@ -65,6 +66,8 @@ def generate_claude_md_section(
     We delegate to injection.build_injection so the CLAUDE.md block honors the
     same Forced Injection policy as every other surface. `task` steers the
     task-relevant (B/C) retrieval and is ignored by the full (A) policy.
+    `repo` folds that repo's committed PROJECT house style into the Cascade,
+    so injecting into a repo automatically carries its house rules.
     """
     if strategy is None:
         # Import lazily so the adapter has no hard dep on config at import time.
@@ -82,6 +85,7 @@ def generate_claude_md_section(
         strategy=strategy,
         embedder=embedder,
         k_exemplars=k_exemplars,
+        repo=repo,
     )
     rules = envelope.rules
     exemplars = envelope.exemplars

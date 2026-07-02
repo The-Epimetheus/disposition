@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "disposition"
-version = "1.0.0"
+version = "1.1.0"
 description = "A personalization layer for AI-assisted coding. Learns how you write, then steers your AI coding tool to match."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,9 @@ dependencies = [
 # tree-sitter deepens Java parsing; without it the parser falls back to a
 # brace-and-signature heuristic, so it is optional.
 java = ["tree-sitter>=0.21", "tree-sitter-java>=0.21"]
+# fastembed enables the semantic embedder (models.embedding = "semantic");
+# without it retrieval uses the offline hashing embedder.
+semantic = ["fastembed>=0.3"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

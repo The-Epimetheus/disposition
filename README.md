@@ -19,8 +19,8 @@ Disposition fixes that. It captures how *you* write, then makes the AI write tha
 ## What it does
 
 - **Learns your style.** It looks at your existing code, asks you a few short coding questions, and watches the edits you make to AI output. From all of that it builds a profile of how you write: naming, formatting, which constructs you reach for, the setups you trust, and how you lay out architecture.
-- **Steers the AI.** Every time your AI tool generates code, Disposition pushes your style into the request. It does not hope the model remembers. It forces your style in on every generation.
-- **Checks the result.** After the AI writes something, Disposition grades it against your profile. If the output does not read like you, it sends it back for a redo before you ever see it.
+- **Steers the AI.** You inject your style into the tool's always-on context (for Claude Code, a marked block in `CLAUDE.md`), so every generation in that repo starts with your rules and examples in front of it. It does not hope the model remembers.
+- **Checks the result.** Run the gate on what the AI wrote and Disposition grades it against your profile. If the output does not read like you, the gate regenerates it, up to a configured cap, and only escalates to you if it still cannot get inside your envelope.
 - **Keeps up with you.** Your style changes over time. Disposition ages its profile so it tracks the current you, and it checks in with you before dropping anything you explicitly confirmed.
 
 Disposition owns no model and writes no code itself. It steers a tool you already use. It is not fine-tuning either. It shapes output through context (prompts, examples, retrieval), not by changing model weights.
@@ -29,11 +29,13 @@ Disposition owns no model and writes no code itself. It steers a tool you alread
 
 The v1 target is Claude Code, Java, and starts solo but includes a shared team layer. The whole loop works end to end:
 
-- **Capture.** Bootstrap mines your own code (author-filtered) into examples. The interview draws out your reasoning with small coding scenarios, live or by voice narration, and adapts its follow-ups to the gaps. Corrections learn from your edits to AI output, both when you point them out and passively by watching a tracked span. Ambient capture folds in new commits as you write them.
+- **Capture.** Bootstrap mines your own code (author-filtered) into examples. The interview draws out your reasoning with small coding scenarios, answered live or as a narration transcript (a typed stream of thought; live voice capture is not built yet), and adapts its follow-ups to the gaps. Corrections learn from your edits to AI output, both when you point them out and passively by watching a tracked span. Ambient capture folds in new commits each time you run it.
 - **Distill.** Induction turns your examples into plain-language rules, auto-accepting the mechanical ones and leaving the rest for you. Consolidation merges near-duplicates so the profile stays tidy.
-- **Steer.** Every generation gets your style forced into context (three injection strategies, your choice) through Claude Code or a proxy for tools that do not speak MCP.
+- **Steer.** Your style gets forced into context (three injection strategies, your choice) through Claude Code's `CLAUDE.md` and MCP server, plus a proxy library you can wire in front of tools that do not speak MCP.
 - **Check.** The verification gate grades output against your profile, cheap deterministic checks first, then an adversarial judge, and regenerates off-style code before you see it.
-- **Keep it honest.** The profile self-ages, decaying stale guesses, and surfaces drift for your sign-off instead of silently overwriting a preference you confirmed. A shared, in-repo project layer carries team house style, and cold-start archetypes seed a profile when you have no history yet.
+- **Keep it honest.** The profile self-ages, decaying stale guesses, and surfaces drift for your sign-off instead of silently overwriting a preference you confirmed. A shared, in-repo project layer carries team house style (and folds into steering whenever you point a command at that repo), and cold-start archetypes seed a profile when you have no history yet.
+
+Out of the box, retrieval matches your task to examples with a deterministic local hashing embedder: no downloads, but the matching is lexical. For real semantic matching, install the extra (`pip install -e ".[semantic]"`) and set `models.embedding = "semantic"` in the config. That runs a local embedding model instead; it downloads once, then works offline like everything else.
 
 The full milestone plan lives in `docs/v1-implementation-plan.md`.
 
@@ -61,9 +63,10 @@ disposition induce --auto                        # distill rules from the exampl
 disposition consolidate                          # merge near-duplicate rules
 disposition status                               # see your Active Style
 
-disposition inject --repo <repo> --task "..."    # force your style into <repo>/CLAUDE.md
+disposition inject --repo <repo> --task "..."    # force your style (and the repo's house style) into <repo>/CLAUDE.md
 #   ...drive Claude Code on the task, then:
-disposition verify --file Out.java --task "..."  # run the output through the gate
+disposition verify --file Out.java --task "..."  # gate: judge, regenerate off-style code, escalate
+#   --write saves the corrected output; --judge-only just reports
 
 disposition track <file> --start N --end M       # mark AI code, then edit freely
 disposition watch                                # sweep up behavior-preserving corrections
