@@ -35,7 +35,7 @@ The v1 target is Claude Code, Java, and starts solo but includes a shared team l
 - **Check.** The verification gate grades output against your profile, cheap deterministic checks first, then an adversarial judge, and regenerates off-style code before you see it.
 - **Keep it honest.** The profile self-ages, decaying stale guesses, and surfaces drift for your sign-off instead of silently overwriting a preference you confirmed. A shared, in-repo project layer carries team house style (and folds into steering whenever you point a command at that repo), and cold-start archetypes seed a profile when you have no history yet.
 
-One honest caveat: retrieval matches your task to examples with a deterministic local hashing embedder. That keeps everything offline, but the matching is lexical, not semantic. A real code embedding model can slot in behind the same config key later.
+Out of the box, retrieval matches your task to examples with a deterministic local hashing embedder: no downloads, but the matching is lexical. For real semantic matching, install the extra (`pip install -e ".[semantic]"`) and set `models.embedding = "semantic"` in the config. That runs a local embedding model instead; it downloads once, then works offline like everything else.
 
 The full milestone plan lives in `docs/v1-implementation-plan.md`.
 

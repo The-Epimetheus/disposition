@@ -38,7 +38,12 @@ def _load_index(store: Store, language: str, embedder: Embedder) -> tuple[Vector
     by_id = {ex.id: ex for ex in exemplars}
     directory = store.index_dir(Layer.LANGUAGE, language)
     if VectorIndex.exists(directory):
-        return VectorIndex.load(directory), by_id
+        cached = VectorIndex.load(directory)
+        # The index is a derived cache keyed to one embedder. If its dim no
+        # longer matches the active embedder, the developer switched embedders
+        # in config, so the cache is stale; fall through and rebuild transiently.
+        if cached.dim == embedder.dim:
+            return cached, by_id
     # No cached index: build a transient one over whatever exemplars we have.
     index = VectorIndex(embedder.dim)
     if exemplars:

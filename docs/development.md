@@ -28,6 +28,9 @@ pip install --user --break-system-packages -e .
 Java AST chunking is an optional extra (`pip install -e ".[java]"`). Without
 it, a heuristic brace-counting parser is used instead.
 
+Real code embeddings are an optional extra too: `pip install -e ".[semantic]"`
+enables the fastembed model. It downloads the model once, then runs offline.
+
 ## Try it
 
 ```
@@ -70,8 +73,9 @@ and `retrieve` (the task-scoped Style envelope: rules plus exemplars).
 Every key is live: change it and behavior changes.
 
 - `models.generation` / `models.judge` - the Anthropic models used.
-- `models.embedding` - the embedder; only `"local"` (the offline hashing
-  embedder) exists today, and anything else is an error.
+- `models.embedding` - the embedder. Valid values are `"local"` (offline
+  hashing, the default) and `"semantic"` (real code embeddings via fastembed;
+  needs the semantic extra). Anything else is an error.
 - `injection.strategy` - the Forced Injection policy: A full, B dynamic, C hybrid.
 - `budgets.max_regens` - how many times the Gate regenerates before escalating.
 - `budgets.retrieval_top_k` - the rule budget retrieval injects per task.

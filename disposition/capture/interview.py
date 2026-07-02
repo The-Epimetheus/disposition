@@ -20,6 +20,7 @@ import yaml
 
 from ..models import Exemplar, Layer, Rule, Status
 from ..llm import get_llm
+from .pipeline import CapturePipeline
 
 
 # The three provocations. Prompts are intentionally terse and non-leading: they
@@ -214,9 +215,12 @@ def run_interview(
             _collect_adaptive(store, language, llm, input_fn, output_fn)
         )
 
-    exemplars_added = _persist_exemplars(store, language, new_exemplars, embedder)
-    rules_added = store.merge_rules(Layer.LANGUAGE, new_rules, language)
-    return InterviewResult(exemplars_added=exemplars_added, rules_added=rules_added)
+    counts = CapturePipeline(store, language, embedder=embedder).capture(
+        exemplars=new_exemplars, rules=new_rules
+    )
+    return InterviewResult(
+        exemplars_added=counts.exemplars_added, rules_added=counts.rules_added
+    )
 
 
 # -- adaptive gap-model (ADR 0012) ------------------------------------------
@@ -318,19 +322,6 @@ def _persist_narration(store, scenario_id: str, narration: str) -> None:
     path = directory / f"{scenario_id}.md"
     with path.open("a", encoding="utf-8") as handle:
         handle.write(narration.strip() + "\n\n---\n\n")
-
-
-# -- persistence ------------------------------------------------------------
-
-
-def _persist_exemplars(store, language: str, new: list[Exemplar], embedder) -> int:
-    """Add Exemplars (dedup by id) and rebuild the Language exemplar index."""
-    if not new:
-        return 0
-    before = len(store.load_exemplars(Layer.LANGUAGE, language))
-    merged = store.add_exemplars(Layer.LANGUAGE, new, language)
-    store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
-    return len(merged) - before
 
 
 # -- interactive fallback ---------------------------------------------------

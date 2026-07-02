@@ -19,6 +19,7 @@ from ..embeddings import Embedder
 from ..gitutil import git_lines
 from ..java import chunk_java_file
 from ..models import Exemplar, Layer
+from .pipeline import CapturePipeline
 
 
 @dataclass
@@ -80,13 +81,10 @@ def bootstrap(
                 )
             )
 
-    exemplars_before = len(store.load_exemplars(Layer.LANGUAGE, language))
-    merged = store.add_exemplars(Layer.LANGUAGE, new, language)
-    added = len(merged) - exemplars_before
-    index_size = store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
+    counts = CapturePipeline(store, language, embedder=embedder).capture(exemplars=new)
 
     return BootstrapResult(
-        exemplars_added=added,
+        exemplars_added=counts.exemplars_added,
         files_scanned=len(files),
-        index_size=index_size,
+        index_size=counts.index_size,
     )

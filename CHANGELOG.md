@@ -5,6 +5,8 @@ The format follows Keep a Changelog; versions are managed with bump.
 
 ## [Unreleased]
 
+- Embeddings: new semantic embedder (fastembed, local ONNX model) behind `models.embedding = "semantic"` via the `[semantic]` extra; retrieval rebuilds transparently when the configured embedder's dimension changes
+- Capture: one CapturePipeline persists Exemplars and Rules as a unit (add, reindex, merge); bootstrap, interview, ambient, and correction all cross that one seam now
 - Gate: `disposition verify` now runs the full loop (deterministic tier, judge, regenerate up to budgets.max_regens, escalate); `--write` saves the fix, `--judge-only` keeps the old one-pass report
 - Cascade: `active_style` takes an optional repo and folds in its committed PROJECT house style; `status` and `verify` gained `--repo` and `inject` uses its repo automatically
 - Config: every key in config.toml is honored now (budgets.max_regens, budgets.retrieval_top_k, models.embedding); unknown embedding models error instead of being ignored

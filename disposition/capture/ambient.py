@@ -21,6 +21,7 @@ import yaml
 from ..gitutil import git_lines, git_out
 from ..java import chunk_java_file
 from ..models import Exemplar, Layer
+from .pipeline import CapturePipeline
 
 
 @dataclass
@@ -104,11 +105,8 @@ def capture(
                 )
             )
 
-    before = len(store.load_exemplars(Layer.LANGUAGE, language))
-    merged = store.add_exemplars(Layer.LANGUAGE, new, language)
-    added = len(merged) - before
-    if added:
-        store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
+    counts = CapturePipeline(store, language, embedder=embedder).capture(exemplars=new)
+    added = counts.exemplars_added
     marks[repo] = head
     _save_watermarks(store, marks)
     return AmbientResult(len(commits), len(files), added, head)

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from ..llm import get_llm
 from ..models import Exemplar, Layer, Rule, Status
+from .pipeline import CapturePipeline
 
 # Below this the edit is treated as behavior-changing and excluded (ADR 0009).
 _PRESERVING_THRESHOLD = 0.7
@@ -190,13 +191,14 @@ def reinforce(
         source=src,
         provenance="correction",
     )
-    store.add_exemplars(Layer.LANGUAGE, [exemplar], language)
 
-    # Merge the taste-delta Rule into the Language layer, newest wins by key,
-    # and rebuild the derived index so the new Exemplar is retrievable now.
+    # Persist the correction Exemplar and merge the taste-delta Rule (newest wins
+    # by key) into the Language layer; the pipeline rebuilds the derived index so
+    # the new Exemplar is retrievable now.
     rule = _taste_delta_rule(ai_code, edited_code, confidence, llm)
-    store.merge_rules(Layer.LANGUAGE, [rule], language)
-    store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
+    CapturePipeline(store, language, embedder=embedder).capture(
+        exemplars=[exemplar], rules=[rule]
+    )
 
     return CorrectionResult(
         accepted=True, reason=reason, rule_added=True, exemplar_added=True
