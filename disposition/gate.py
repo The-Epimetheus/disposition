@@ -167,13 +167,39 @@ def deterministic_check(output: str, retrieved) -> list[Violation]:
     return violations
 
 
+def llm_regenerator(
+    llm: LLM, retrieved, task: str = ""
+) -> Callable[[str, list[Violation]], str]:
+    """A `regenerate` callback that re-asks `llm` to rewrite inside the envelope.
+
+    Each retry is anchored to exactly what it broke: the previous attempt plus
+    the judge's citations, alongside the same Rules and Exemplars, so the model
+    fixes the violations instead of starting over.
+    """
+
+    def _regenerate(previous: str, violations: list[Violation]) -> str:
+        cites = "\n".join(f"- [{v.cite}] {v.detail}" for v in violations)
+        prompt = (
+            f"TASK:\n{task or '(unspecified)'}\n\n"
+            f"DEVELOPER RULES:\n{_render_rules(retrieved)}\n\n"
+            f"DEVELOPER EXEMPLARS:\n{_render_exemplars(retrieved)}\n\n"
+            f"PREVIOUS OUTPUT:\n{previous}\n\n"
+            f"The previous output violated the developer's style:\n{cites}\n\n"
+            "Rewrite the output so it honours every rule above and matches the "
+            "exemplars' texture. Return only the rewritten code, no commentary."
+        )
+        return llm.complete(prompt)
+
+    return _regenerate
+
+
 def verify(
     output: str,
     retrieved,
     *,
     llm: LLM | None = None,
     task: str = "",
-    max_regens: int = 3,
+    max_regens: int | None = None,
     regenerate: Callable[[str, list[Violation]], str] | None = None,
 ) -> GateResult:
     """Check `output`, regenerate against violations up to `max_regens`, escalate.
@@ -182,8 +208,11 @@ def verify(
     LLM judge, and combines their violations. Loop: check -> if clean, pass;
     else if a `regenerate` callback exists, feed it the previous output and the
     combined violations to get a fresh attempt, and check again. Stop when clean
-    or the cap is hit; hitting the cap sets `escalated`.
+    or the cap is hit; hitting the cap sets `escalated`. `max_regens` defaults
+    to the configured budgets.max_regens (ADR 0006).
     """
+    if max_regens is None:
+        max_regens = int(Config.load().budgets.get("max_regens", 3))
     if llm is None:
         # The judge runs on the configured judge model, distinct from generation.
         cfg = Config.load()

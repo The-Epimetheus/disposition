@@ -19,8 +19,6 @@ from pathlib import Path
 import yaml
 
 from ..models import Exemplar, Layer, Rule, Status
-from ..embeddings import get_embedder
-from ..index import VectorIndex
 from ..llm import get_llm
 
 
@@ -217,7 +215,7 @@ def run_interview(
         )
 
     exemplars_added = _persist_exemplars(store, language, new_exemplars, embedder)
-    rules_added = _persist_rules(store, language, new_rules)
+    rules_added = store.merge_rules(Layer.LANGUAGE, new_rules, language)
     return InterviewResult(exemplars_added=exemplars_added, rules_added=rules_added)
 
 
@@ -325,41 +323,14 @@ def _persist_narration(store, scenario_id: str, narration: str) -> None:
 # -- persistence ------------------------------------------------------------
 
 
-def _persist_rules(store, language: str, new_rules: list[Rule]) -> int:
-    """Merge new Rules into the Language layer by key; return the net added."""
-    if not new_rules:
-        return 0
-    existing = store.load_rules(Layer.LANGUAGE, language)
-    by_key = {r.key: r for r in existing}
-    before = len(by_key)
-    for rule in new_rules:
-        by_key[rule.key] = rule  # a fresh answer supersedes a prior one
-    store.save_rules(Layer.LANGUAGE, list(by_key.values()), language)
-    return len(by_key) - before
-
-
 def _persist_exemplars(store, language: str, new: list[Exemplar], embedder) -> int:
     """Add Exemplars (dedup by id) and rebuild the Language exemplar index."""
     if not new:
         return 0
     before = len(store.load_exemplars(Layer.LANGUAGE, language))
     merged = store.add_exemplars(Layer.LANGUAGE, new, language)
-    added = len(merged) - before
-
-    # Rebuild the derived vector index over every Language exemplar so the new
-    # ones are retrievable. The index is a cache; a full rebuild keeps it honest.
-    embedder = embedder or get_embedder()
-    index = VectorIndex(embedder.dim)
-    if merged:
-        vectors = embedder.embed([ex.code for ex in merged])
-        index.add_many(
-            [
-                (ex.id, vectors[i], {"source": ex.source, "provenance": ex.provenance})
-                for i, ex in enumerate(merged)
-            ]
-        )
-    index.save(store.index_dir(Layer.LANGUAGE, language))
-    return added
+    store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
+    return len(merged) - before
 
 
 # -- interactive fallback ---------------------------------------------------

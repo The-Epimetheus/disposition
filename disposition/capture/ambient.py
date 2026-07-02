@@ -18,9 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from ..embeddings import get_embedder
 from ..gitutil import git_lines, git_out
-from ..index import VectorIndex
 from ..java import chunk_java_file
 from ..models import Exemplar, Layer
 
@@ -106,27 +104,11 @@ def capture(
                 )
             )
 
-    added = _add_and_reindex(store, language, new, embedder)
-    marks[repo] = head
-    _save_watermarks(store, marks)
-    return AmbientResult(len(commits), len(files), added, head)
-
-
-def _add_and_reindex(store, language: str, new: list[Exemplar], embedder) -> int:
-    """Add exemplars (dedup by id) and rebuild the Language vector index."""
     before = len(store.load_exemplars(Layer.LANGUAGE, language))
     merged = store.add_exemplars(Layer.LANGUAGE, new, language)
     added = len(merged) - before
-    if added == 0:
-        return 0
-    embedder = embedder or get_embedder()
-    index = VectorIndex(embedder.dim)
-    vectors = embedder.embed([ex.code for ex in merged])
-    index.add_many(
-        [
-            (ex.id, vectors[i], {"source": ex.source, "provenance": ex.provenance})
-            for i, ex in enumerate(merged)
-        ]
-    )
-    index.save(store.index_dir(Layer.LANGUAGE, language))
-    return added
+    if added:
+        store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
+    marks[repo] = head
+    _save_watermarks(store, marks)
+    return AmbientResult(len(commits), len(files), added, head)

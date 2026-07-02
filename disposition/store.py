@@ -3,7 +3,8 @@
 The store owns the ~/.disposition/profiles/ tree. Rules live in a legible,
 hand-editable rules.yaml per layer (the trust mechanism, ADR 0008). The
 Personal layer is a fixed directory; the Language layer is named for the
-language itself (for example profiles/java). The Project layer is phase 2.
+language itself (for example profiles/java). The shared Project layer lives
+inside a repo (ADR 0011) and folds into the Active Style when a repo is given.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from pathlib import Path
 import yaml
 
 from .cascade import active_style
+from .embeddings import Embedder, get_embedder
+from .index import VectorIndex
 from .models import Exemplar, Layer, Rule, Status
 
 
@@ -65,16 +68,30 @@ class Store:
             )
         return rules
 
-    def load_active_layers(self, language: str) -> list[Rule]:
-        """All Rules from the layers active in v1 (Personal + Language)."""
+    def load_active_layers(
+        self, language: str, repo: str | Path | None = None
+    ) -> list[Rule]:
+        """All Rules from the applicable layers.
+
+        Personal and Language always apply. When `repo` is given, that repo's
+        committed house style (<repo>/.disposition/rules.yaml, ADR 0011) joins
+        them as the PROJECT layer; the Cascade resolves the rest.
+        """
         rules = self.load_rules(Layer.PERSONAL)
         rules += self.load_rules(Layer.LANGUAGE, language)
-        # Project layer is phase 2 (ADR 0011); nothing to merge in v1.
+        if repo is not None:
+            # Lazy import: project.py imports Store, so a top-level import
+            # here would be circular.
+            from .project import load_project_rules
+
+            rules += load_project_rules(repo, language)
         return rules
 
-    def active_style(self, language: str) -> list[Rule]:
-        """The merged, winning set of Rules for a given language."""
-        return active_style(self.load_active_layers(language))
+    def active_style(
+        self, language: str, repo: str | Path | None = None
+    ) -> list[Rule]:
+        """The merged, winning set of Rules for a language (and, optionally, a repo)."""
+        return active_style(self.load_active_layers(language, repo))
 
     # -- exemplars -----------------------------------------------------------
 
@@ -152,7 +169,59 @@ class Store:
             Layer.LANGUAGE, language
         )
 
+    def rebuild_index(
+        self,
+        layer: Layer,
+        language: str | None = None,
+        *,
+        embedder: Embedder | None = None,
+    ) -> int:
+        """Rebuild the derived vector index over a layer's Exemplars.
+
+        The index is a cache; a full rebuild keeps ids and vectors in lockstep
+        with the stored Exemplars. Returns the number of vectors indexed.
+        """
+        embedder = embedder or get_embedder()
+        exemplars = self.load_exemplars(layer, language)
+        index = VectorIndex(embedder.dim)
+        if exemplars:
+            vectors = embedder.embed([ex.code for ex in exemplars])
+            index.add_many(
+                [
+                    (ex.id, vectors[i], {"source": ex.source, "provenance": ex.provenance})
+                    for i, ex in enumerate(exemplars)
+                ]
+            )
+        index.save(self.index_dir(layer, language))
+        return len(index)
+
     # -- writing -------------------------------------------------------------
+
+    def merge_rules(
+        self,
+        layer: Layer,
+        new: list[Rule],
+        language: str | None = None,
+        *,
+        keep_existing: bool = False,
+    ) -> int:
+        """Merge Rules into a layer by key, then persist. Returns the net added.
+
+        The default policy is newest-wins: a fresh Rule supersedes a stored one
+        with the same key. `keep_existing=True` flips that (used by archetype
+        seeding, which must never clobber Style the developer already earned).
+        """
+        if not new:
+            return 0
+        existing = self.load_rules(layer, language)
+        by_key = {rule.key: rule for rule in existing}
+        before = len(by_key)
+        for rule in new:
+            if keep_existing and rule.key in by_key:
+                continue
+            by_key[rule.key] = rule
+        self.save_rules(layer, list(by_key.values()), language)
+        return len(by_key) - before
 
     def save_rules(
         self, layer: Layer, rules: list[Rule], language: str | None = None

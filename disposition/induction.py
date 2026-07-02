@@ -230,7 +230,7 @@ def triage(
         else:
             provisional += 1
 
-    _merge(store, accepted, language)
+    store.merge_rules(Layer.LANGUAGE, accepted, language)
     return {"confirmed": confirmed, "provisional": provisional}
 
 
@@ -245,12 +245,3 @@ def _prompt_one(cand: Candidate, *, input_fn, output_fn) -> Status | None:
         return None
     # Anything else (including empty) defaults to the safe, non-steering state.
     return Status.PROVISIONAL
-
-
-def _merge(store: Store, new: list[Rule], language: str) -> None:
-    """Merge new Rules into the Language layer, replacing same-key entries."""
-    existing = store.load_rules(Layer.LANGUAGE, language)
-    by_key = {rule.key: rule for rule in existing}
-    for rule in new:
-        by_key[rule.key] = rule
-    store.save_rules(Layer.LANGUAGE, list(by_key.values()), language)

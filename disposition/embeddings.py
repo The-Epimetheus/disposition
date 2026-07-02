@@ -78,5 +78,18 @@ class LocalEmbedder(Embedder):
 
 
 def get_embedder(config=None) -> Embedder:
-    """Default embedder for the pipeline. Offline `LocalEmbedder` for M1."""
+    """Resolve the embedder named by config (models.embedding).
+
+    Only "local" (the offline hashing embedder) exists today, so anything else
+    is a configuration mistake and we say so instead of silently ignoring it.
+    The seam is here for a real code-embedding model to slot in later.
+    """
+    from .config import Config
+
+    cfg = config or Config.load()
+    name = str(cfg.models.get("embedding", "local"))
+    if name != "local":
+        raise ValueError(
+            f"unknown embedding model {name!r} in config.toml; only 'local' is available"
+        )
     return LocalEmbedder()

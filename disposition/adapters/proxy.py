@@ -72,13 +72,14 @@ class Proxy:
         language: str = "java",
         llm: LLM | None = None,
         embedder=None,
-        max_regens: int = 3,
+        max_regens: int | None = None,
     ) -> None:
         self.store = store
         self.language = language
         # Generation runs on the configured generation model (or a wired fake).
         self.llm = llm or get_llm()
         self.embedder = embedder
+        # None defers to the configured budgets.max_regens (gate.verify resolves it).
         self.max_regens = max_regens
 
     def steer(self, prompt: str, *, task: str = "") -> str:

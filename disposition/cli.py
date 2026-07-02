@@ -25,6 +25,8 @@ from .capture import interview as interview_mod
 from .capture import provenance as provenance_mod
 from .config import Config, default_root
 from .gate import judge as gate_judge
+from .gate import llm_regenerator as gate_regenerator
+from .gate import verify as gate_verify
 from .induction import consolidate as consolidate_fn
 from .induction import induce as induce_fn
 from .induction import triage as triage_fn
@@ -74,12 +76,16 @@ def init(language: str = typer.Option("java", help="Language layer to set up."))
 
 @app.command()
 def status(
-    language: str = typer.Option("java", help="Language layer to report on.")
+    language: str = typer.Option("java", help="Language layer to report on."),
+    repo: str = typer.Option(
+        None, "--repo", help="Also merge this repo's PROJECT house style."
+    ),
 ) -> None:
-    """Show the merged Active Style for a language."""
+    """Show the merged Active Style for a language (and optionally a repo)."""
     store = _store()
-    rules = store.active_style(language)
-    typer.echo(f"Active Style (personal + {language}):")
+    rules = store.active_style(language, repo)
+    layers = f"personal + {language}" + (" + project" if repo else "")
+    typer.echo(f"Active Style ({layers}):")
     if not rules:
         typer.echo("  (no rules yet - run bootstrap/interview/induce)")
         return
@@ -172,7 +178,7 @@ def inject(
     store = _store()
     strat = strategy or Config.load().injection.get("strategy", "B")
     section = claude_code.generate_claude_md_section(
-        store, language=language, task=task, strategy=strat
+        store, language=language, task=task, strategy=strat, repo=repo
     )
     path = claude_code.write_claude_md(section, repo=repo)
     typer.echo(f"Wrote Disposition block to {path}")
@@ -185,17 +191,61 @@ def verify(
     file: str = typer.Option(..., "--file", help="File whose contents to judge."),
     task: str = typer.Option("", "--task", help="Task the output was meant to satisfy."),
     language: str = typer.Option("java", help="Language layer to judge against."),
+    repo: str = typer.Option(
+        None, "--repo", help="Also judge against this repo's PROJECT house style."
+    ),
+    judge_only: bool = typer.Option(
+        False, "--judge-only", help="One judge pass, report only, no regeneration."
+    ),
+    write: bool = typer.Option(
+        False, "--write", help="Overwrite FILE with the regenerated output when the gate fixes it."
+    ),
 ) -> None:
-    """Run the adversarial judge once over a file and report violations."""
+    """Run the Verification Gate over a file: judge, regenerate, escalate."""
     store = _store()
     output = Path(file).read_text(encoding="utf-8")
-    retrieved = retrieve_fn(store, task=task, language=language)
-    violations = gate_judge(output, retrieved, get_llm(), task=task)
-    if not violations:
+    retrieved = retrieve_fn(store, task=task, language=language, repo=repo)
+    llm = get_llm()
+
+    if judge_only:
+        violations = gate_judge(output, retrieved, llm, task=task)
+        if not violations:
+            typer.echo("PASS: output is inside the style envelope.")
+            return
+        typer.echo(f"FAIL: {len(violations)} violation(s):")
+        for v in violations:
+            typer.echo(f"  - [{v.cite}] {v.detail}")
+        raise typer.Exit(code=1)
+
+    # The full Gate: deterministic tier + judge, regenerating on violations up
+    # to the configured budgets.max_regens, then escalating to the human.
+    result = gate_verify(
+        output,
+        retrieved,
+        llm=llm,
+        task=task,
+        regenerate=gate_regenerator(llm, retrieved, task=task),
+    )
+
+    if result.passed and result.regens == 0:
         typer.echo("PASS: output is inside the style envelope.")
         return
-    typer.echo(f"FAIL: {len(violations)} violation(s):")
-    for v in violations:
+
+    if result.passed:
+        typer.echo(f"PASS after {result.regens} regeneration(s).")
+        if write:
+            Path(file).write_text(result.final_output, encoding="utf-8")
+            typer.echo(f"Wrote the corrected output back to {file}")
+        else:
+            typer.echo("Corrected output (use --write to save it):")
+            typer.echo(result.final_output)
+        return
+
+    typer.echo(
+        f"ESCALATE: still {len(result.violations)} violation(s) "
+        f"after {result.regens} regeneration(s):"
+    )
+    for v in result.violations:
         typer.echo(f"  - [{v.cite}] {v.detail}")
     raise typer.Exit(code=1)
 

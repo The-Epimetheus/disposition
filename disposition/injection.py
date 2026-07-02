@@ -17,6 +17,7 @@ Any unknown strategy falls back to "B" so misconfiguration degrades gracefully.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from .embeddings import Embedder
 from .models import Exemplar, Rule, Status
@@ -32,9 +33,13 @@ class Injection:
     exemplars: list[Exemplar]
 
 
-def _confirmed_active_rules(store: Store, language: str) -> list[Rule]:
+def _confirmed_active_rules(
+    store: Store, language: str, repo: str | Path | None = None
+) -> list[Rule]:
     """Every Confirmed rule in the merged Active Style (Provisional dropped)."""
-    return [r for r in store.active_style(language) if r.status is Status.CONFIRMED]
+    return [
+        r for r in store.active_style(language, repo) if r.status is Status.CONFIRMED
+    ]
 
 
 def build_injection(
@@ -44,20 +49,22 @@ def build_injection(
     task: str | None = None,
     strategy: str = "B",
     embedder: Embedder | None = None,
-    k_rules: int = 8,
+    k_rules: int | None = None,
     k_exemplars: int = 5,
+    repo: str | Path | None = None,
 ) -> Injection:
     """Assemble the Style envelope under the chosen Forced Injection strategy.
 
     See the module docstring for the A/B/C policies. `task` steers the dynamic
     (B) and hybrid (C) exemplar retrieval; it is ignored by the full (A) policy.
+    `repo` folds that repo's committed PROJECT house style into the Cascade.
     """
     strat = (strategy or "B").upper()
 
     if strat == "A":
         # Full: all Confirmed rules + every exemplar, task-independent.
         return Injection(
-            rules=_confirmed_active_rules(store, language),
+            rules=_confirmed_active_rules(store, language, repo),
             exemplars=store.all_exemplars(language),
         )
 
@@ -70,9 +77,10 @@ def build_injection(
             k_rules=k_rules,
             k_exemplars=k_exemplars,
             embedder=embedder,
+            repo=repo,
         )
         return Injection(
-            rules=_confirmed_active_rules(store, language),
+            rules=_confirmed_active_rules(store, language, repo),
             exemplars=got.exemplars,
         )
 
@@ -84,5 +92,6 @@ def build_injection(
         k_rules=k_rules,
         k_exemplars=k_exemplars,
         embedder=embedder,
+        repo=repo,
     )
     return Injection(rules=got.rules, exemplars=got.exemplars)

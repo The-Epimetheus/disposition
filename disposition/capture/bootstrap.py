@@ -15,9 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..embeddings import Embedder, get_embedder
+from ..embeddings import Embedder
 from ..gitutil import git_lines
-from ..index import VectorIndex
 from ..java import chunk_java_file
 from ..models import Exemplar, Layer
 
@@ -62,7 +61,6 @@ def bootstrap(
     method/class units, stores them as LANGUAGE-layer Exemplars (deduped by
     content id), then embeds every LANGUAGE exemplar into a saved VectorIndex.
     """
-    embedder = embedder or get_embedder()
     files = _tracked_java(repo_path, author)[:limit]
 
     new: list[Exemplar] = []
@@ -85,22 +83,10 @@ def bootstrap(
     exemplars_before = len(store.load_exemplars(Layer.LANGUAGE, language))
     merged = store.add_exemplars(Layer.LANGUAGE, new, language)
     added = len(merged) - exemplars_before
-
-    # Rebuild the index over the full LANGUAGE exemplar set (the index is a
-    # derived cache; a clean rebuild keeps ids and vectors in lockstep).
-    index = VectorIndex(embedder.dim)
-    if merged:
-        vectors = embedder.embed([ex.code for ex in merged])
-        index.add_many(
-            [
-                (ex.id, vectors[i], {"source": ex.source, "start_line": ex.start_line})
-                for i, ex in enumerate(merged)
-            ]
-        )
-    index.save(store.index_dir(Layer.LANGUAGE, language))
+    index_size = store.rebuild_index(Layer.LANGUAGE, language, embedder=embedder)
 
     return BootstrapResult(
         exemplars_added=added,
         files_scanned=len(files),
-        index_size=len(index),
+        index_size=index_size,
     )

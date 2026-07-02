@@ -82,14 +82,8 @@ def apply_archetype(store: Store, name: str, *, language: str = "java") -> int:
             f"unknown archetype {name!r}; choose one of {list_archetypes()}"
         )
 
-    existing = store.load_rules(Layer.LANGUAGE, language)
-    by_key = {rule.key: rule for rule in existing}
-
-    added = 0
-    for seed in seeds:
-        if seed["key"] in by_key:
-            continue  # do not overwrite Style the developer already has
-        by_key[seed["key"]] = Rule(
+    rules = [
+        Rule(
             key=seed["key"],
             text=seed["text"],
             status=Status.PROVISIONAL,
@@ -97,8 +91,7 @@ def apply_archetype(store: Store, name: str, *, language: str = "java") -> int:
             provenance="archetype",
             tags=["mechanical"] if seed.get("mechanical") else [],
         )
-        added += 1
-
-    if added:
-        store.save_rules(Layer.LANGUAGE, list(by_key.values()), language)
-    return added
+        for seed in seeds
+    ]
+    # keep_existing: never overwrite Style the developer already has.
+    return store.merge_rules(Layer.LANGUAGE, rules, language, keep_existing=True)

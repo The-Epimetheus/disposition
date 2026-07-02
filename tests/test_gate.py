@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from disposition.gate import GateResult, Violation, judge, verify
+from disposition.gate import GateResult, Violation, judge, llm_regenerator, verify
 from disposition.llm import FakeLLM
 from disposition.models import Layer, Rule, Status
 
@@ -103,6 +103,44 @@ class TestVerify(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertTrue(result.escalated)
         self.assertEqual(result.regens, 0)
+
+
+class TestLlmRegenerator(unittest.TestCase):
+    def test_retry_is_anchored_to_rules_and_violations(self):
+        seen = {}
+
+        def script(prompt, kind):
+            seen["prompt"] = prompt
+            return "rewritten code"
+
+        regen = llm_regenerator(FakeLLM(script), _retrieved(), task="add()")
+        out = regen("bad code", [Violation("early-returns", "nested if/else")])
+
+        self.assertEqual(out, "rewritten code")
+        # The retry prompt must carry the rules, the citation, and the attempt.
+        self.assertIn("early-returns", seen["prompt"])
+        self.assertIn("nested if/else", seen["prompt"])
+        self.assertIn("bad code", seen["prompt"])
+        self.assertIn("add()", seen["prompt"])
+
+    def test_the_full_loop_with_the_regenerator(self):
+        # verify + llm_regenerator: first judge flags, regen rewrites via
+        # complete(), second judge passes. One FakeLLM drives both roles.
+        def script(prompt, kind):
+            if kind == "complete":
+                return "clean code"
+            return [] if "clean code" in prompt else [{"cite": "k", "detail": "d"}]
+
+        llm = FakeLLM(script)
+        result = verify(
+            "bad code",
+            _retrieved(),
+            llm=llm,
+            regenerate=llm_regenerator(llm, _retrieved()),
+        )
+        self.assertTrue(result.passed)
+        self.assertEqual(result.regens, 1)
+        self.assertEqual(result.final_output, "clean code")
 
 
 if __name__ == "__main__":
